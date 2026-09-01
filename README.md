@@ -173,9 +173,10 @@ T刻使用十进制运算处理金额，各项费用分别计算并四舍五入�
 - macOS 12 及以上；
 - 当前仅在 Apple Silicon Mac 上完成实机验证；
 - 应用采用本机 ad-hoc 签名，未做 Apple 公证；
-- 暂未提供 Windows 安装包和自动更新。
+- 提供 Windows x64 NSIS 安装包，目前仅完成 GitHub Actions 构建验证，尚未完成 Windows 实机验收；
+- 暂未提供自动更新。
 
-当前仓库未附带可直接下载的安装包，需要从源码运行或自行打包。
+可在 [GitHub Releases](https://github.com/stevqin/stock-calc/releases) 下载 macOS Apple Silicon DMG 或 Windows x64 安装包。未签名或未公证的安装包可能触发系统安全提示，请确认下载来源后再决定是否运行。
 
 ### 从源码启动
 
@@ -183,7 +184,7 @@ T刻使用十进制运算处理金额，各项费用分别计算并四舍五入�
 
 - Node.js 22 或更高版本；
 - Rust 工具链；
-- macOS 上的 Xcode Command Line Tools。
+- macOS 上的 Xcode Command Line Tools，或 Windows 上的 Microsoft C++ Build Tools 与 WebView2 开发环境。
 
 ```sh
 npm ci
@@ -206,6 +207,9 @@ npm run build
 # 构建 macOS .app 和 .dmg
 npm run package
 
+# 在 Windows x64 环境构建 NSIS 安装包
+npm run package:windows
+
 # Rust 测试
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
@@ -215,7 +219,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```text
 src-tauri/target/release/bundle/macos/
 src-tauri/target/release/bundle/dmg/
+src-tauri/target/release/bundle/nsis/
 ```
+
+推送 `v*` 版本标签后，GitHub Actions 会同时构建 macOS Apple Silicon DMG 与 Windows x64 NSIS 安装包，并上传到对应的 GitHub Release；也可以手动选择单个平台，为已有版本补充安装包。
 
 ## 数据存储与隐私
 

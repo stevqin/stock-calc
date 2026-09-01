@@ -11,6 +11,8 @@
     "tauri": "tauri",
     "desktop": "tauri dev",
     "package": "node scripts/package-mac.mjs",
+    "package:mac": "node scripts/package-mac.mjs",
+    "package:windows": "tauri build --bundles nsis -- --locked",
     "format": "prettier --write src vite.config.ts package.json tsconfig.json index.html",
     "check:format": "prettier --check src vite.config.ts package.json tsconfig.json index.html"
   },

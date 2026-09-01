@@ -1,0 +1,141 @@
+name: 发布桌面安装包
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布或补充附件的版本标签，例如 v0.4.0"
+        required: true
+        type: string
+      platform:
+        description: "本次需要构建的平台"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: 准备 GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 确定并校验版本标签
+        id: release-tag
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "版本标签必须符合 v1.2.3 格式：$REQUESTED_TAG" >&2
+            exit 1
+          fi
+          git rev-parse --verify "refs/tags/$REQUESTED_TAG"
+          echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: 确保版本发布存在
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "将安装包上传到现有版本 $RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "T刻 ${RELEASE_TAG#v}" \
+              --generate-notes
+          fi
+
+  macos:
+    name: macOS Apple Silicon DMG
+    needs: prepare
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建并上传 DMG
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tagName: ${{ needs.prepare.outputs.tag }}
+          args: --target aarch64-apple-darwin --bundles dmg
+          releaseDraft: false
+          prerelease: false
+          retryAttempts: 1
+          uploadUpdaterJson: false
+          uploadWorkflowArtifacts: true
+          releaseAssetNamePattern: Tke_[version]_[platform]_[arch][_setup][ext]
+
+  windows:
+    name: Windows x64 NSIS
+    needs: prepare
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建并上传 Windows 安装包
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tagName: ${{ needs.prepare.outputs.tag }}
+          args: --bundles nsis
+          releaseDraft: false
+          prerelease: false
+          retryAttempts: 1
+          uploadUpdaterJson: false
+          uploadWorkflowArtifacts: true
+          releaseAssetNamePattern: Tke_[version]_[platform]_[arch][_setup][ext]

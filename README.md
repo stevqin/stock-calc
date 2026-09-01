@@ -26,6 +26,26 @@ T刻把这些问题做成了可反复调整的测算工具，同时提供本地�
 
 **T刻只负责计算、记账和复盘，不连接券商账户，不读取券商持仓，也不会自动下单。**
 
+## 界面预览
+
+> 以下截图使用专门构造的模拟账户。持仓、成交、资金与收益数据均不来自真实账户；行情区域使用公开参考行情，可能存在延迟。
+
+### 自选与持仓
+
+![T刻自选与模拟持仓工作台](./docs/images/tke-holdings-demo.png)
+
+### 证券行情
+
+![T刻证券行情详情](./docs/images/tke-market-detail-demo.png)
+
+### 做 T 正算
+
+![T刻做T正算与持仓影响测算](./docs/images/tke-planner-forward-demo.png)
+
+### 交易记录
+
+![T刻模拟交易记录](./docs/images/tke-trade-history-demo.png)
+
 ## 核心能力
 
 ### 1. 做 T 正算：计划输入后立即看结果

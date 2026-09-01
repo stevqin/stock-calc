@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Local calculator window only; no filesystem, shell, or generic HTTP plugins.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

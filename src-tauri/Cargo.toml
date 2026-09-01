@@ -1,0 +1,35 @@
+[package]
+name = "t-calculator"
+version = "0.4.0"
+description = "A-share and ETF round-trip cost calculator"
+authors = ["Stev"]
+edition = "2021"
+rust-version = "1.87"
+
+[lib]
+name = "t_calculator_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset"] }
+encoding_rs = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"
+rfd = "0.15"
+
+[profile.release]
+strip = "debuginfo"
+lto = true
+codegen-units = 1
+opt-level = "s"
+
+# macOS 27 dyld rejects some stripped proc-macro dylibs (LINKEDIT alignment).
+# Host build dependencies are not shipped; leave them unstripped.
+[profile.release.build-override]
+strip = false

@@ -3,6 +3,8 @@ import { manualAccount } from "./record";
 import {
   configurableColumnLabels,
   defaultView,
+  defaultMemberOrder,
+  addToWatchlist,
   defaultColumnWidth,
   setTableView,
   tableView,
@@ -149,10 +151,10 @@ describe("自选工作区", () => {
         "contributionBreakdown",
         "flow",
       ],
-      sort: "totalContribution",
+      sort: "",
       direction: "desc",
     });
-    expect(tableView(w, "loss").direction).toBe("asc");
+    expect(tableView(w, "loss").direction).toBe("desc");
     expect(
       resolvedColumnWidths(tableView(w, "profit"), 1242, "contribution"),
     ).toMatchObject({
@@ -394,4 +396,72 @@ describe("自选工作区", () => {
       expect(() => validateWorkspace(a)).toThrow();
     },
   );
+});
+
+it("盈利亏损组允许保存手动排序，取消排序回到默认顺序", () => {
+  const w = upgradeWorkspace(manualAccount()).workspace!;
+  for (const id of ["profit", "loss"]) {
+    setTableView(w, id, {
+      ...tableView(w, id),
+      sort: "latest",
+      direction: "asc",
+    });
+    expect(tableView(w, id).sort).toBe("latest");
+    expect(tableView(w, id).direction).toBe("asc");
+    setTableView(w, id, { ...tableView(w, id), sort: "", direction: "desc" });
+    expect(tableView(w, id).sort).toBe("");
+  }
+});
+
+it("默认按添加顺序和最新交易时间排序，旧数据补回遗漏证券且不重复添加", () => {
+  const a = upgradeWorkspace(manualAccount());
+  const [first, second, third] = a.securities.map((s) => s.id);
+  a.workspace!.watchlist = [second];
+  delete a.workspace!.watchlistOrder;
+  a.entries = [
+    {
+      id: "one",
+      securityId: first,
+      kind: "opening",
+      quantity: "100",
+      available: "100",
+      price: "10",
+      time: "2026-08-27T01:00:00.000Z",
+      date: "2026-08-27",
+    },
+    {
+      id: "two",
+      securityId: third,
+      kind: "opening",
+      quantity: "100",
+      available: "100",
+      price: "10",
+      time: "2026-08-28T01:00:00.000Z",
+      date: "2026-08-28",
+    },
+  ];
+  const next = upgradeWorkspace(a);
+  expect(a.workspace!.watchlist).toEqual([second]);
+  expect(next.workspace!.watchlist).toEqual([second, first, third]);
+  expect(defaultMemberOrder(next, "all", [third, first, second])).toEqual([
+    second,
+    first,
+    third,
+  ]);
+  for (const id of ["holdings", "profit", "loss"])
+    expect(defaultMemberOrder(next, id, [second, first, third])).toEqual([
+      third,
+      first,
+      second,
+    ]);
+  addToWatchlist(next.workspace!, [first]);
+  expect(next.workspace!.watchlistOrder).toEqual([second, first, third]);
+  removeWatchlist(next.workspace!, [first]);
+  expect(upgradeWorkspace(next).workspace!.watchlist).not.toContain(first);
+  addToWatchlist(next.workspace!, [first]);
+  expect(defaultMemberOrder(next, "all", next.workspace!.watchlist)).toEqual([
+    second,
+    third,
+    first,
+  ]);
 });

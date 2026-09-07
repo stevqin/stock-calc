@@ -19,6 +19,8 @@ import RowContextMenu from "./components/RowContextMenu.vue";
 import MarketChart from "./components/MarketChart.vue";
 import LedgerWorkbench from "./LedgerWorkbench.vue";
 import RecoveryCenter from "./components/RecoveryCenter.vue";
+import PnlAnalysis from "./PnlAnalysis.vue";
+import { clearAnalysisHistory } from "./analysisHistory";
 import { manualAccount, upgradeAccount } from "./sim/record";
 import { replay, validateAccount, validateSecurity } from "./sim/ledger";
 import { loadAccount, saveAccount } from "./sim/repository";
@@ -27,6 +29,8 @@ import { shanghaiDate } from "./sim/model";
 import {
   upgradeWorkspace,
   defaultView,
+  addToWatchlist,
+  defaultMemberOrder,
   tableView,
   setTableView,
   columnLabels,
@@ -202,14 +206,16 @@ const members = computed(() =>
           : w.value.watchlist,
 );
 const rows = computed(() =>
-  members.value.flatMap((id) => {
-    const s = securities.value.get(id);
-    return s &&
-      (assetFilter.value === "all" || s.asset === assetFilter.value) &&
-      `${s.name}${s.code}`.includes(query.value.trim())
-      ? [s]
-      : [];
-  }),
+  defaultMemberOrder(account.value, w.value.activeView, members.value).flatMap(
+    (id) => {
+      const s = securities.value.get(id);
+      return s &&
+        (assetFilter.value === "all" || s.asset === assetFilter.value) &&
+        `${s.name}${s.code}`.includes(query.value.trim())
+        ? [s]
+        : [];
+    },
+  ),
 );
 const view = computed(() => tableView(w.value, w.value.activeView));
 const configurableColumns = computed(() =>
@@ -264,12 +270,7 @@ const menuItems = computed(() => {
       id: "up",
       label: "上移",
       separator: true,
-      disabled:
-        saving.value ||
-        !single ||
-        isHoldings.value ||
-        isContribution.value ||
-        index <= 0,
+      disabled: saving.value || !single || !currentGroup.value || index <= 0,
     },
     {
       id: "down",
@@ -277,8 +278,7 @@ const menuItems = computed(() => {
       disabled:
         saving.value ||
         !single ||
-        isHoldings.value ||
-        isContribution.value ||
+        !currentGroup.value ||
         index < 0 ||
         index >= members.value.length - 1,
     },
@@ -325,9 +325,7 @@ function rowMenuAction(id: string) {
   else if (id === "watch") {
     const ids = [...checked.value];
     void commit((a) => {
-      a.workspace!.watchlist = [
-        ...new Set([...a.workspace!.watchlist, ...ids]),
-      ];
+      addToWatchlist(a.workspace!, ids);
     }, "已加入全部自选");
   }
 }
@@ -486,11 +484,12 @@ let queue: Promise<unknown> = Promise.resolve();
 function commit(
   change: (a: Account) => void,
   text = "已保存",
+  background = false,
 ): Promise<boolean> {
   const job = queue
     .catch(() => {})
     .then(async () => {
-      saving.value = true;
+      if (!background) saving.value = true;
       failure.value = "";
       try {
         const next = JSON.parse(JSON.stringify(account.value)) as Account;
@@ -505,7 +504,7 @@ function commit(
         failure.value = e instanceof Error ? e.message : String(e);
         return false;
       } finally {
-        saving.value = false;
+        if (!background) saving.value = false;
       }
     });
   queue = job;
@@ -518,7 +517,8 @@ function saved(a: Account, rev: number) {
 async function choose(id: string) {
   if (selected.value === id) return;
   selected.value = id;
-  await commit((a) => (a.selectedId = id), "");
+  // Remember selection without dimming navigation for this background UI save.
+  await commit((a) => (a.selectedId = id), "", true);
 }
 function detail(id: string) {
   void choose(id);
@@ -671,8 +671,7 @@ async function addToGroup() {
         );
         if (groups.some((g) => !g))
           throw new Error("所选分组已不存在，请重新选择");
-        if (groupIds.length)
-          state.watchlist = [...new Set([...state.watchlist, ...ids])];
+        if (groupIds.length) addToWatchlist(state, ids);
         if (single) {
           for (const g of state.groups) {
             if (!groupIds.includes(g.id))
@@ -706,6 +705,7 @@ async function removeChecked() {
   }
 }
 async function moveRow(delta: number) {
+  if (!currentGroup.value) return;
   const id = checked.value[0];
   if (!id || checked.value.length !== 1) return;
   await commit((a) => {
@@ -776,7 +776,7 @@ async function addSecurity() {
         validateSecurity(s);
         a.securities.push(s);
       }
-      if (!a.workspace!.watchlist.includes(id)) a.workspace!.watchlist.push(id);
+      addToWatchlist(a.workspace!, [id]);
       if (currentGroup.value) {
         const g = a.workspace!.groups.find(
           (g) => g.id === currentGroup.value!.id,
@@ -824,6 +824,7 @@ async function restore(a: Account) {
 async function clearCache() {
   try {
     await clearMarket();
+    clearAnalysisHistory();
     notify("仅清理行情缓存，账户记录未改变");
     void poller.refresh();
     void flowPoller.refresh();
@@ -981,6 +982,7 @@ onMounted(async () => {
     selected.value = account.value.selectedId;
     if (
       loaded.account.schemaVersion !== 4 ||
+      !loaded.account.workspace?.watchlistOrder ||
       Object.values(loaded.account.workspace!.views).some(
         (v) => v.layoutVersion !== 8,
       )
@@ -1028,6 +1030,7 @@ onBeforeUnmount(() => {
           v-for="p in [
             { id: 'market', name: '自选与持仓' },
             { id: 'trades', name: '历史成交' },
+            { id: 'analysis', name: '盈亏分析' },
             { id: 'cash', name: '资金流水' },
             { id: 'fees', name: '费用设置' },
             { id: 'backup', name: '备份恢复' },
@@ -1544,6 +1547,9 @@ onBeforeUnmount(() => {
           </div>
         </Transition>
       </div>
+    </section>
+    <section v-else-if="page === 'analysis'" class="desk-page">
+      <PnlAnalysis :account="account" />
     </section>
     <section v-else-if="page === 'backup'" class="desk-page">
       <RecoveryCenter

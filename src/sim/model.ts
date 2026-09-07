@@ -64,6 +64,8 @@ export interface TableView {
 }
 export interface WorkspaceState {
   watchlist: string[];
+  /** Stable addition order, independent of manual row moves. */
+  watchlistOrder?: string[];
   groups: WatchGroup[];
   activeView: string;
   chartMode: "intraday" | "daily";

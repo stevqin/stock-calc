@@ -18,6 +18,8 @@ pub struct Quote {
     fetched_at: String,
     kind: String,
     previous_close: Option<String>,
+    limit_up: Option<String>,
+    limit_down: Option<String>,
     open: Option<String>,
     high: Option<String>,
     low: Option<String>,
@@ -108,6 +110,8 @@ fn parse_quote(bytes: &[u8], market: &str, code: &str) -> Result<Quote, String> 
         fetched_at: chrono::Utc::now().to_rfc3339(),
         kind: kind.into(),
         previous_close: positive_price(fields[4]),
+        limit_up: fields.get(47).and_then(|value| positive_price(value)),
+        limit_down: fields.get(48).and_then(|value| positive_price(value)),
         open: positive_price(fields[5]),
         high: positive_price(fields[33]),
         low: positive_price(fields[34]),
@@ -259,6 +263,7 @@ pub fn run() {
             fund_flows::fetch_fund_flows,
             search::search_securities,
             charts::fetch_chart,
+            charts::fetch_analysis_history,
             storage::load_account,
             storage::save_account,
             storage::export_account,
@@ -310,6 +315,31 @@ mod tests {
             assert_eq!(q.kind, if kind == "ETF" { "etf" } else { "stock" });
             assert_eq!(q.pe_ratio.as_deref(), (kind == "GP-A").then_some("19.97"));
             assert_eq!(q.pb_ratio.as_deref(), (kind == "GP-A").then_some("6.47"));
+        }
+    }
+    #[test]
+    fn parses_daily_price_limits_and_ignores_missing_or_invalid_values() {
+        let bytes = fixture("600519", "股票", "10", "GP-A");
+        let (decoded, _, _) = encoding_rs::GBK.decode(&bytes);
+        for (up, down, expected_up, expected_down) in [
+            ("11.00", "9.00", Some("11.00"), Some("9.00")),
+            ("", "", None, None),
+            ("0", "-1", None, None),
+        ] {
+            let payload = decoded
+                .trim()
+                .strip_prefix("v_sh600519=\"")
+                .unwrap()
+                .strip_suffix("\";")
+                .unwrap();
+            let mut fields: Vec<&str> = payload.split('~').collect();
+            fields[47] = up;
+            fields[48] = down;
+            let text = format!("v_sh600519=\"{}\";", fields.join("~"));
+            let (encoded, _, _) = encoding_rs::GBK.encode(&text);
+            let quote = parse_quote(&encoded, "sh", "600519").unwrap();
+            assert_eq!(quote.limit_up.as_deref(), expected_up);
+            assert_eq!(quote.limit_down.as_deref(), expected_down);
         }
     }
     #[test]

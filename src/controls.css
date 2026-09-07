@@ -7,6 +7,8 @@
   --ui-border: #cbd6e4;
   --ui-hover-border: #8ca9d2;
   --ui-action: #3268cf;
+  --ui-focus-border: #527fc8;
+  --ui-focus-ring: 0 0 0 3px rgba(50, 104, 207, 0.12);
   --ui-surface: #ffffff;
   --ui-disabled: #f3f6fa;
   --ui-radius: 6px;
@@ -118,17 +120,38 @@ label > input[type="checkbox"],
 label > input[type="radio"] {
   margin: 0;
 }
-:is(input, select, textarea):hover:not(:disabled):not(:read-only),
-select:hover:not(:disabled) {
+:is(input, select, textarea):hover:not(:focus):not(:disabled):not(:read-only),
+select:hover:not(:focus):not(:disabled) {
   border-color: var(--ui-hover-border);
 }
 button:hover:not(:disabled) {
   border-color: var(--ui-hover-border);
   background-color: #edf3ff;
 }
-:is(button, input, select, textarea, summary):focus-visible {
-  outline: 2px solid var(--ui-action);
+:is(
+  button,
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="file"],
+  summary
+):focus-visible {
+  outline: 2px solid var(--ui-focus-border);
   outline-offset: 2px;
+}
+/* Text fields carry focus on their existing edge, without a second outline. */
+:where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  select,
+  textarea
+):focus {
+  outline: none;
+  border-color: var(--ui-focus-border);
+  box-shadow: var(--ui-focus-ring);
+  caret-color: var(--ui-action);
+}
+:is(input, select, textarea)[aria-invalid="true"]:focus {
+  border-color: #b13342;
+  box-shadow: 0 0 0 3px rgba(177, 51, 66, 0.12);
 }
 :is(input, select, textarea)[aria-invalid="true"] {
   border-color: #b13342;

@@ -148,9 +148,232 @@ async fn request_chart(
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| "图表响应不是JSON")?;
     parse_chart(value, &symbol, &mode)
 }
+fn analysis_history_url(market: &str, code: &str, year: i32) -> Result<String, String> {
+    use chrono::Datelike;
+    let current_year = (chrono::Utc::now() + chrono::Duration::hours(8)).year();
+    if (!super::valid_symbol(market, code) && !(market == "sh" && code == "000001"))
+        || !(1990..=current_year).contains(&year)
+    {
+        return Err("历史行情证券或年份无效".into());
+    }
+    Ok(format!("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={market}{code},day,{}-12-01,{year}-12-31,400,", year - 1))
+}
+fn parse_analysis_history(value: Value, symbol: &str, year: i32) -> Result<Value, String> {
+    let source = &value["data"][symbol];
+    if source.get("qfqday").is_some() || source.get("hfqday").is_some() {
+        return Err("历史分析需要不复权行情".into());
+    }
+    let mut result = parse_chart(value, symbol, "daily-raw")?;
+    let bars = result["bars"].as_array_mut().ok_or("历史行情缺失")?;
+    if bars.len() > 400 {
+        return Err("历史行情条数超限".into());
+    }
+    let start = format!("{}-12-01", year - 1);
+    let end = format!("{year}-12-31");
+    let mut seen = std::collections::HashSet::new();
+    for bar in bars.iter() {
+        let date = bar["date"].as_str().ok_or("历史行情日期缺失")?;
+        if date < start.as_str() || date > end.as_str() || !seen.insert(date.to_owned()) {
+            return Err("历史行情日期超出请求范围或重复".into());
+        }
+        let n = |key: &str| bar[key].as_str().unwrap().parse::<f64>().unwrap();
+        if n("open") < n("low")
+            || n("open") > n("high")
+            || n("close") < n("low")
+            || n("close") > n("high")
+        {
+            return Err("历史行情价格超出高低范围".into());
+        }
+    }
+    bars.sort_by(|a, b| a["date"].as_str().cmp(&b["date"].as_str()));
+    Ok(result)
+}
+fn eastmoney_history_url(market: &str, code: &str, year: i32) -> Result<String, String> {
+    // Reuse the same narrow symbol/year validation as the primary source.
+    analysis_history_url(market, code, year)?;
+    let exchange = if market == "sh" { 1 } else { 0 };
+    Ok(format!("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={exchange}.{code}&klt=101&fqt=0&beg={}1201&end={year}1231&lmt=400&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56", year - 1))
+}
+fn parse_eastmoney_history(value: Value, symbol: &str, year: i32) -> Result<Value, String> {
+    let data = &value["data"];
+    let exchange = if symbol.starts_with("sh") { 1 } else { 0 };
+    if value["rc"].as_i64() != Some(0)
+        || data["code"].as_str() != symbol.get(2..)
+        || data["market"].as_i64() != Some(exchange)
+    {
+        return Err("备用历史行情证券不匹配或暂无数据".into());
+    }
+    let lines = data["klines"].as_array().ok_or("备用历史行情日线缺失")?;
+    if lines.is_empty() || lines.len() > 400 {
+        return Err("备用历史行情为空或条数超限".into());
+    }
+    let mut rows = Vec::new();
+    for line in lines {
+        let fields: Vec<&str> = line
+            .as_str()
+            .ok_or("备用历史行情格式异常")?
+            .split(',')
+            .collect();
+        if fields.len() != 6 {
+            return Err("备用历史行情字段缺失".into());
+        }
+        rows.push(json!(fields));
+    }
+    // The request explicitly uses fqt=0. Normalize raw OHLCV and apply the same
+    // strict identity, date, bounds and price validation as the primary source.
+    parse_analysis_history(json!({"code":0,"data":{symbol:{"day":rows}}}), symbol, year)
+}
+async fn history_json(client: &reqwest::Client, url: &str) -> Result<Value, String> {
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|_| "历史行情请求超时或网络不可用")?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "历史行情服务返回 HTTP {}",
+            response.status().as_u16()
+        ));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "读取历史行情失败")? {
+        if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
+            return Err("历史行情响应过大".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| "历史行情响应不是 JSON（可能被服务端拦截）".into())
+}
+async fn request_analysis_history(
+    client: &reqwest::Client,
+    market: &str,
+    code: &str,
+    year: i32,
+) -> Result<Value, String> {
+    let primary = analysis_history_url(market, code, year)?;
+    let backup = eastmoney_history_url(market, code, year)?;
+    let symbol = format!("{market}{code}");
+    let primary_result = match history_json(client, &primary).await {
+        Ok(value) => parse_analysis_history(value, &symbol, year),
+        Err(error) => Err(error),
+    };
+    match primary_result {
+        Ok(data) => Ok(data),
+        Err(primary_error) => {
+            let fallback = match history_json(client, &backup).await {
+                Ok(value) => parse_eastmoney_history(value, &symbol, year),
+                Err(error) => Err(error),
+            };
+            fallback.map_err(|error| format!("腾讯：{primary_error}；东方财富：{error}"))
+        }
+    }
+}
+#[tauri::command]
+pub async fn fetch_analysis_history(
+    client: tauri::State<'_, reqwest::Client>,
+    window: tauri::WebviewWindow,
+    market: String,
+    code: String,
+    year: i32,
+) -> Result<Value, String> {
+    if !window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(true) {
+        return Err("窗口隐藏，历史行情刷新已暂停".into());
+    }
+    request_analysis_history(&client, &market, &code, year).await
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fallback_annual_parser_checks_identity_range_and_raw_prices() {
+        let data = json!({"rc":0,"data":{"code":"510300","market":1,"klines":["2026-09-07,4.635,4.634,4.649,4.612,9930783","2025-12-01,4.646,4.687,4.688,4.639,5783014"]}});
+        let result = parse_eastmoney_history(data.clone(), "sh510300", 2026).unwrap();
+        assert_eq!(result["bars"][0]["date"], "2025-12-01");
+        assert_eq!(result["bars"][1]["close"], "4.634");
+        assert_eq!(result["adjustment"], "不复权");
+        assert!(parse_eastmoney_history(data.clone(), "sz510300", 2026).is_err());
+        assert!(parse_eastmoney_history(data.clone(), "sh600519", 2026).is_err());
+        assert!(parse_eastmoney_history(data, "sh510300", 2025).is_err());
+        assert!(parse_eastmoney_history(json!({"rc":0,"data":null}), "sh510300", 2026).is_err());
+        assert!(parse_eastmoney_history(
+            json!({"rc":0,"data":{"code":"510300","market":1,"klines":["2026-09-07,4,9,5,3,100"]}}),
+            "sh510300",
+            2026
+        )
+        .is_err());
+    }
+    #[test]
+    fn fallback_url_requests_unadjusted_bounded_history() {
+        let url = eastmoney_history_url("sh", "510300", 2026).unwrap();
+        assert!(url.contains("secid=1.510300"));
+        assert!(url.contains("fqt=0"));
+        assert!(url.contains("beg=20251201&end=20261231"));
+        assert!(eastmoney_history_url("xx", "510300", 2026).is_err());
+    }
+    #[test]
+    fn annual_request_is_bounded_and_unadjusted() {
+        let url = analysis_history_url("sh", "000001", 2025).unwrap();
+        assert!(url.ends_with("param=sh000001,day,2024-12-01,2025-12-31,400,"));
+        assert!(!url.contains("qfq"));
+        assert!(analysis_history_url("sh", "000001", 1980).is_err());
+    }
+    #[test]
+    fn annual_parser_rejects_adjusted_and_outside_range_and_sorts() {
+        let data = json!({"code":0,"data":{"sh000001":{"day":[["2025-01-03","10","11","12","9","100"],["2024-12-31","10","10","12","9","100"]]}}});
+        let result = parse_analysis_history(data, "sh000001", 2025).unwrap();
+        assert_eq!(result["bars"][0]["date"], "2024-12-31");
+        assert_eq!(result["adjustment"], "不复权");
+        assert!(parse_analysis_history(
+            json!({"code":0,"data":{"sh000001":{"qfqday":[]}}}),
+            "sh000001",
+            2025
+        )
+        .is_err());
+        assert!(parse_analysis_history(
+            json!({"code":0,"data":{"sh000001":{"day":[["2023-12-31","10","11","12","9","100"]]}}}),
+            "sh000001",
+            2025
+        )
+        .is_err());
+    }
+    #[test]
+    #[ignore = "manual public-network annual history smoke test"]
+    fn live_analysis_history() {
+        tauri::async_runtime::block_on(async {
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(8))
+                .redirect(reqwest::redirect::Policy::none())
+                .user_agent("TCalculator/0.4 (personal ledger)")
+                .build()
+                .unwrap();
+            for (market, code, year) in [
+                ("sh", "510300", 2026),
+                ("sz", "159915", 2025),
+                ("sh", "000001", 2026),
+            ] {
+                let fallback_json =
+                    history_json(&client, &eastmoney_history_url(market, code, year).unwrap())
+                        .await
+                        .unwrap();
+                let fallback =
+                    parse_eastmoney_history(fallback_json, &format!("{market}{code}"), year)
+                        .unwrap();
+                assert!(!fallback["bars"].as_array().unwrap().is_empty());
+                let result = request_analysis_history(&client, market, code, year)
+                    .await
+                    .unwrap();
+                let bars = result["bars"].as_array().unwrap();
+                assert!(!bars.is_empty());
+                assert_eq!(result["adjustment"], "不复权");
+                println!(
+                    "{market}{code} {year}: {} raw bars, {} to {}",
+                    bars.len(),
+                    bars[0]["date"],
+                    bars.last().unwrap()["date"]
+                );
+            }
+        });
+    }
     #[test]
     #[ignore = "manual public-network chart smoke test"]
     fn live_charts() {

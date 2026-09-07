@@ -211,8 +211,8 @@ export function defaultView(id = "holdings"): TableView {
           ? [...defaultColumns]
           : [...defaultMarketColumns],
     widths: {},
-    sort: kind === "contribution" ? "totalContribution" : "",
-    direction: id === "loss" ? "asc" : "desc",
+    sort: "",
+    direction: "desc",
   };
 }
 export function resolvedColumnWidths(
@@ -242,7 +242,7 @@ export function resolvedColumnWidths(
 }
 export function tableView(w: WorkspaceState, id: string): TableView {
   const fallback = defaultView(id);
-  if (viewKind(id) === "contribution") return fallback;
+
   const saved = w.views[id];
   const allowed = new Set(fallback.columns);
   const columns = (saved?.columns ?? fallback.columns).filter((column) =>
@@ -257,7 +257,6 @@ export function tableView(w: WorkspaceState, id: string): TableView {
   };
 }
 export function setTableView(w: WorkspaceState, id: string, view: TableView) {
-  if (viewKind(id) === "contribution") return;
   w.views[id] = {
     ...view,
     layoutVersion: 8,
@@ -265,7 +264,68 @@ export function setTableView(w: WorkspaceState, id: string, view: TableView) {
     widths: { ...view.widths },
   };
 }
+export function addToWatchlist(w: WorkspaceState, ids: string[]) {
+  w.watchlistOrder ??= [...w.watchlist];
+  for (const id of ids) {
+    if (!w.watchlist.includes(id)) w.watchlist.push(id);
+    if (!w.watchlistOrder.includes(id)) w.watchlistOrder.push(id);
+  }
+}
+
+export function defaultMemberOrder(
+  a: Account,
+  id: string,
+  members: string[],
+): string[] {
+  if (id === "all") {
+    const order = new Map(
+      (a.workspace?.watchlistOrder ?? members).map((id, index) => [id, index]),
+    );
+    return [...members].sort(
+      (a, b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity),
+    );
+  }
+  if (id !== "holdings" && !automaticViewIds.includes(id as "profit" | "loss"))
+    return members;
+  const latest = new Map<string, string>();
+  for (const e of a.entries) {
+    if (e.time > (latest.get(e.securityId) ?? ""))
+      latest.set(e.securityId, e.time);
+  }
+  return [...members].sort((a, b) =>
+    (latest.get(b) ?? "").localeCompare(latest.get(a) ?? ""),
+  );
+}
+
 export function upgradeWorkspace(a: Account): Account {
+  const next = upgradeWorkspaceLayout(a);
+  if (next.workspace!.watchlistOrder) return next;
+  // One-time migration: retain legacy addition order and restore recorded securities.
+  const workspace = {
+    ...next.workspace!,
+    watchlist: [...next.workspace!.watchlist],
+    views: { ...next.workspace!.views },
+  };
+  addToWatchlist(
+    workspace,
+    [...next.entries]
+      .sort((a, b) => a.time.localeCompare(b.time))
+      .map((e) => e.securityId),
+  );
+  for (const id of ["all", "holdings", ...automaticViewIds]) {
+    const saved = workspace.views[id];
+    if (saved)
+      workspace.views[id] = {
+        ...defaultView(id),
+        ...saved,
+        sort: "",
+        direction: "desc",
+      };
+  }
+  return { ...next, workspace };
+}
+
+function upgradeWorkspaceLayout(a: Account): Account {
   if (a.schemaVersion === 4) {
     validateWorkspace(a);
     if (
@@ -390,6 +450,8 @@ export function validateWorkspace(a: Account) {
       throw new Error("分组成员重复或引用不存在的证券");
   };
   checkMembers(w.watchlist, ids);
+  if (w.watchlistOrder !== undefined)
+    checkMembers(w.watchlistOrder, new Set(w.watchlist));
   const groupIds = new Set(["all", "holdings", ...automaticViewIds]);
   const names = new Set<string>();
   for (const g of w.groups) {
@@ -434,6 +496,8 @@ export function validateWorkspace(a: Account) {
 export function removeWatchlist(w: WorkspaceState, ids: string[]) {
   const removed = new Set(ids);
   w.watchlist = w.watchlist.filter((id) => !removed.has(id));
+  if (w.watchlistOrder)
+    w.watchlistOrder = w.watchlistOrder.filter((id) => !removed.has(id));
   for (const g of w.groups)
     g.members = g.members.filter((id) => !removed.has(id));
 }

@@ -1,5 +1,6 @@
 import { mount, flushPromises } from "@vue/test-utils";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { marketQuotes } from "./market";
 import LedgerWorkbench from "./LedgerWorkbench.vue";
 import { manualAccount, draftRecord, insertRecord } from "./sim/record";
 import { loadAccount, saveAccount } from "./sim/repository";
@@ -34,6 +35,7 @@ const draft = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const key of Object.keys(marketQuotes)) delete marketQuotes[key];
   account = manualAccount();
   account.selectedId = id;
   account.feeConfirmed.stock = true;
@@ -66,6 +68,54 @@ async function start() {
   await wrapper.find('input[type="datetime-local"]').setValue(time);
 }
 describe("先输入再选择买卖", () => {
+  it("显示双向成交金额和费用，超卖只禁用卖出而不显示持仓不足提示", async () => {
+    await start();
+    expect(
+      wrapper.get('[data-direction="buy"] .trade-cash-preview').text(),
+    ).toContain("1,005.01");
+    expect(
+      wrapper.get('[data-direction="buy"] .trade-fees-preview').text(),
+    ).toContain("5.01");
+    expect(
+      wrapper.get('[data-direction="sell"] .trade-cash-preview').text(),
+    ).toContain("994.49");
+    expect(
+      wrapper.get('[data-direction="sell"] .trade-fees-preview').text(),
+    ).toContain("5.51");
+    await wrapper.get('[aria-label="成交股数"]').setValue("1100");
+    expect(
+      wrapper.get(".submit-order.sell").attributes("disabled"),
+    ).toBeDefined();
+    expect(
+      wrapper.get(".submit-order.buy").attributes("disabled"),
+    ).toBeUndefined();
+    expect(wrapper.text()).not.toContain("历史持仓不足");
+  });
+  it("有工作区快照时首帧直接显示正确证券，不等待重复读取账本", async () => {
+    account.securities.find((s) => s.id === id)!.name = "快照证券";
+    vi.mocked(loadAccount).mockImplementation(() => new Promise(() => {}));
+    wrapper = mount(LedgerWorkbench, {
+      props: {
+        embedded: true,
+        action: "record",
+        symbol: id,
+        snapshot: { account, revision: 1 },
+      },
+      global: { stubs: { MarketChart: true } },
+    });
+    expect(wrapper.find(".startup").exists()).toBe(false);
+    expect(wrapper.find('[aria-label="成交价"]').exists()).toBe(true);
+    await flushPromises();
+    await wrapper.get('[aria-label="成交价"]').setValue("10");
+    await wrapper.get('input[type="datetime-local"]').setValue(time);
+    expect(
+      wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
+    ).toContain("10.0000 → 10.0046");
+    expect(wrapper.find(".watchlist").exists()).toBe(false);
+    expect(wrapper.find(".market").exists()).toBe(false);
+    expect(wrapper.find(".details").exists()).toBe(false);
+    expect(wrapper.find(".account-strip").exists()).toBe(false);
+  });
   it("紧凑布局只有一个成交时间输入，切换费用口径不清空交易字段或实际费用", async () => {
     await start();
     const originalTime = (
@@ -106,16 +156,16 @@ describe("先输入再选择买卖", () => {
     await fees[0].setValue("1");
     await fees[1].setValue("0.5");
     await fees[2].setValue("0.01");
-    expect(wrapper.find('[data-direction="sell"] strong').text()).toBe(
-      "998.49",
-    );
+    expect(
+      wrapper.get('[data-direction="sell"] .trade-cost-preview').text(),
+    ).toContain("10.0017");
     await wrapper.find(".submit-order.sell").trigger("click");
     await flushPromises();
     const saved = vi.mocked(saveAccount).mock.calls[0][0].entries.at(-1)!;
     expect(saved.feeSource).toBe("actual");
     expect(saved.fees?.cash).toBe("998.49");
   });
-  it("可一键填入全部可卖数量，并随价格测算FIFO本次收益与收益率", async () => {
+  it("可一键填入全部可卖数量，清仓后不显示收益预览", async () => {
     await start();
     const close = wrapper.get(".quantity-shortcuts .close-position");
     expect(close.text()).toBe("清仓（全部可卖）");
@@ -125,11 +175,105 @@ describe("先输入再选择买卖", () => {
         .value,
     ).toBe("1000");
     await wrapper.get('[aria-label="成交价"]').setValue("11");
-    const profit = wrapper.get(".trade-profit-preview");
-    expect(profit.text()).toContain("本次收益");
-    expect(profit.text()).toContain("989.39");
-    expect(profit.text()).toContain("+9.89%");
+    expect(
+      wrapper.get('[data-direction="sell"] .trade-cost-preview').text(),
+    ).toContain("10.0000 → 已清仓");
+    expect(wrapper.find(".trade-profit-preview").exists()).toBe(false);
     expect(saveAccount).not.toHaveBeenCalled();
+  });
+  it("预览含费用的买卖后摊薄成本，随价格更新并处理清仓", async () => {
+    await start();
+    const cost = (side: string) =>
+      wrapper.get(`[data-direction="${side}"] .trade-cost-preview`);
+    expect(cost("buy").text()).toContain("10.0000 → 10.0046");
+    expect(cost("sell").text()).toContain("10.0000 → 10.0061");
+    await wrapper.get('[aria-label="成交价"]').setValue("11");
+    expect(cost("buy").text()).toContain("10.0955");
+    expect(cost("sell").text()).toContain("9.8951");
+    await wrapper.get(".quantity-shortcuts .close-position").trigger("click");
+    expect(cost("sell").text()).toContain("已清仓");
+    expect(cost("sell").text()).not.toContain("NaN");
+    await wrapper.get('[aria-label="成交股数"]').setValue("0");
+    expect(cost("buy").text()).toContain("—");
+    expect(cost("sell").text()).toContain("—");
+  });
+  it("补录交易后的成本按发生时点计算，不混入之后的成交", async () => {
+    insertRecord(
+      account,
+      draftRecord(account, id, "buy", "20", "100", "2026-08-29T01:30:00.000Z")
+        .entry,
+    );
+    await start();
+    expect(
+      wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
+    ).toContain("10.0046");
+  });
+  it("无底仓时预览首次买入成本，卖出不显示虚构成本", async () => {
+    account.entries = [];
+    await start();
+    expect(
+      wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
+    ).toContain("10.0501");
+    expect(
+      wrapper.get('[data-direction="sell"] .trade-cost-preview').text(),
+    ).toContain("—");
+  });
+  it("价格和数量加减更新成本，价格绑定同日行情边界并拒绝手输越界", async () => {
+    marketQuotes[id] = {
+      market: "sh",
+      code: "600519",
+      name: "贵州茅台",
+      latest: "10",
+      bid: "10",
+      ask: "10",
+      quoteTime: "20260828143000",
+      fetchedAt: "2026-08-28T06:30:00Z",
+      kind: "stock",
+      limitUp: "11.00",
+      limitDown: "9.00",
+    };
+    await start();
+    const price = wrapper.get('[aria-label="成交价"]');
+    expect(price.attributes("min")).toBe("9.00");
+    expect(price.attributes("max")).toBe("11.00");
+    await wrapper.get('[aria-label="成交价增加0.01"]').trigger("click");
+    expect((price.element as HTMLInputElement).value).toBe("10.01");
+    expect(wrapper.text()).toContain("手动价格");
+    await price.setValue("11");
+    await wrapper.get('[aria-label="成交价增加0.01"]').trigger("click");
+    expect((price.element as HTMLInputElement).value).toBe("11.00");
+    await price.setValue("9");
+    await wrapper.get('[aria-label="成交价减少0.01"]').trigger("click");
+    expect((price.element as HTMLInputElement).value).toBe("9.00");
+    await price.setValue("11.01");
+    expect(
+      wrapper.get(".submit-order.buy").attributes("disabled"),
+    ).toBeDefined();
+    expect(
+      wrapper.get(".submit-order.sell").attributes("disabled"),
+    ).toBeDefined();
+    await price.setValue("10");
+    await wrapper.get('[aria-label="成交股数增加100"]').trigger("click");
+    expect(
+      (wrapper.get('[aria-label="成交股数"]').element as HTMLInputElement)
+        .value,
+    ).toBe("200");
+    expect(
+      wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
+    ).toContain("10.0042");
+    await wrapper.get('[aria-label="成交股数减少100"]').trigger("click");
+    expect(
+      (wrapper.get('[aria-label="成交股数"]').element as HTMLInputElement)
+        .value,
+    ).toBe("100");
+    await wrapper
+      .get('input[type="datetime-local"]')
+      .setValue("2026-08-27T10:00:00");
+    expect(price.attributes("max")).toBe("1000000");
+    await price.setValue("12");
+    expect(
+      wrapper.get(".submit-order.buy").attributes("disabled"),
+    ).toBeUndefined();
   });
   it("公共草稿恢复价格数量和费用而不恢复方向", async () => {
     vi.mocked(readDraft).mockImplementation(async (key) =>
@@ -176,12 +320,6 @@ describe("先输入再选择买卖", () => {
     async (direction) => {
       await start();
       expect(wrapper.find(".trade-sides").exists()).toBe(false);
-      expect(wrapper.find('[data-direction="buy"] strong').text()).toBe(
-        "1,005.01",
-      );
-      expect(wrapper.find('[data-direction="sell"] strong').text()).toBe(
-        "994.49",
-      );
       await wrapper.find(".ticket form").trigger("submit");
       expect(saveAccount).not.toHaveBeenCalled();
       await wrapper.find(`.submit-order.${direction}`).trigger("click");

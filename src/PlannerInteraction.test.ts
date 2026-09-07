@@ -91,12 +91,8 @@ it("正算与反推通过页签切换，同一时间只显示一套输入和结�
   expect(wrapper.find(".planner-reverse").exists()).toBe(false);
   expect(input("买入价").exists()).toBe(true);
   expect(input("卖出价").exists()).toBe(true);
-  expect(wrapper.find(".planner-forward").text()).toContain(
-    "测算后持仓 / 成本金额",
-  );
-  expect(wrapper.find(".planner-forward").text()).toContain(
-    "摊薄成本 / 持仓市值",
-  );
+  expect(wrapper.find(".planner-forward").text()).toContain("交易后持仓成本");
+  expect(wrapper.find(".planner-forward").text()).toContain("交易后持仓市值");
   await tabs[1].trigger("click");
   expect(tabs[1].attributes("aria-selected")).toBe("true");
   expect(wrapper.findAll(".planner-card")).toHaveLength(1);
@@ -145,7 +141,7 @@ it("每3秒跟随最新价，单边手动修改/清空后锁定，恢复后继�
   expect(value("买入价")).toBe("");
   await wrapper
     .findAll("button")
-    .find((b) => b.text() === "买入价跟随行情")!
+    .find((b) => b.attributes("aria-label") === "买入价跟随行情")!
     .trigger("click");
   expect(value("买入价")).toBe("10.200");
 });
@@ -333,4 +329,29 @@ it("使用红涨绿跌灰平色值，包含零变化", () => {
   expect(marketColor(1)).toBe(MARKET_COLORS.gain);
   expect(marketColor(-1)).toBe(MARKET_COLORS.loss);
   expect(marketColor(0)).toBe(MARKET_COLORS.flat);
+});
+
+it("突出扣费做T收益，并分别显示交易后成本和按现价估算的市值", async () => {
+  const a = account();
+  a.entries.push({
+    id: "opening",
+    securityId: "sh510300",
+    kind: "opening",
+    quantity: "1000",
+    available: "1000",
+    price: "10",
+    date: "2026-08-27",
+    time: "2026-08-27T01:00:00.000Z",
+  });
+  vi.mocked(loadAccount).mockResolvedValue({ account: a, revision: 1 });
+  await start();
+  await input("买入价").setValue("9");
+  await input("卖出价").setValue("11");
+  expect(wrapper.get(".plan-net-profit").text()).toContain("199.80");
+  expect(wrapper.get(".plan-holding-cost").text()).toContain("10.0000");
+  expect(wrapper.get(".plan-holding-cost").text()).toContain("9.8002");
+  expect(wrapper.get(".plan-market-value").text()).toContain("10,000.00");
+  expect(
+    wrapper.get(".plan-calculation-details").attributes("open"),
+  ).toBeUndefined();
 });

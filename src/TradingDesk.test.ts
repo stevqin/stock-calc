@@ -70,6 +70,67 @@ beforeEach(() => {
 });
 afterEach(() => wrapper?.unmount());
 describe("重构工作台集成", () => {
+  it("盈亏分析是同级页面，切换日历和区间不保存账本或禁用导航", async () => {
+    await start();
+    vi.mocked(saveAccount).mockClear();
+    await button("盈亏分析").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".pnl-analysis").exists()).toBe(true);
+    await button("最近一年").trigger("click");
+    await button("年").trigger("click");
+    expect(wrapper.findAll(".pnl-period-cell")).toHaveLength(12);
+    expect(wrapper.findAll(".desk-header nav button:disabled")).toHaveLength(0);
+    expect(saveAccount).not.toHaveBeenCalled();
+    await button("资金流水").trigger("click");
+    expect(wrapper.find(".pnl-analysis").exists()).toBe(false);
+    expect(button("资金流水").classes()).toContain("active");
+  });
+  it.each(["all", "holdings"])(
+    "%s 切换股票在保存期间保持导航可用，连续选择按顺序保存",
+    async (view) => {
+      stored.workspace!.activeView = view;
+      await start();
+      const persist = vi.mocked(saveAccount).getMockImplementation()!;
+      let finish!: () => void;
+      vi.mocked(saveAccount).mockImplementationOnce(
+        async (account, expected) => {
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          return persist(account, expected);
+        },
+      );
+      const table = wrapper.findComponent(SecuritiesTable);
+      table.vm.$emit("select", "sz159915");
+      await flushPromises();
+      expect(table.props("selected")).toBe("sz159915");
+      expect(wrapper.findAll(".desk-header nav button:disabled")).toHaveLength(
+        0,
+      );
+      expect(wrapper.text()).not.toContain("正在保存…");
+      table.vm.$emit("select", "sh600519");
+      await flushPromises();
+      expect(table.props("selected")).toBe("sh600519");
+      await button("历史成交").trigger("click");
+      expect(button("历史成交").classes()).toContain("active");
+      finish();
+      await flushPromises();
+      expect(stored.selectedId).toBe("sh600519");
+      expect(wrapper.text()).not.toContain("修订冲突");
+    },
+  );
+  it("后台保存选中股票失败时仍显示错误，后续选择可以保存", async () => {
+    await start();
+    vi.mocked(saveAccount).mockRejectedValueOnce(new Error("磁盘写入失败"));
+    const table = wrapper.findComponent(SecuritiesTable);
+    table.vm.$emit("select", "sz159915");
+    await flushPromises();
+    expect(document.body.textContent).toContain("磁盘写入失败");
+    table.vm.$emit("select", "sh600519");
+    await flushPromises();
+    expect(stored.selectedId).toBe("sh600519");
+    expect(document.body.textContent).not.toContain("磁盘写入失败");
+  });
   it("双击详情新增交易记录页，只显示该证券期初记录，切换测算后可返回", async () => {
     for (const [id, quantity] of [
       ["sh510300", "100"],

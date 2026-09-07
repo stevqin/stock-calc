@@ -45,7 +45,7 @@ import { estimatePlan, projectHolding, solvePlan } from "./sim/planner";
 import type { ChartMode } from "./sim/chart";
 import { validateFees, type Asset } from "./core/calculator";
 import { readDraft, writeDraft, flushDrafts } from "./sim/drafts";
-import { upgradeWorkspace } from "./sim/workspaceState";
+import { upgradeWorkspace, addToWatchlist } from "./sim/workspaceState";
 import { marketQuotes } from "./market";
 import { tradeLabels } from "./sim/tradeLabels";
 const props = defineProps<{
@@ -78,16 +78,23 @@ const duplicateWarning = ref(false),
   duplicateAck = ref(false),
   draftReady = ref(false),
   draftError = ref("");
-const account = ref<Account>(manualAccount()),
-  ready = ref(false),
+// Embedded panels use an isolated copy of the already-loaded workspace.
+// This avoids a loading screen and another disk read on every panel open.
+const initialSnapshot = props.embedded ? props.snapshot : undefined;
+const account = ref<Account>(
+    initialSnapshot
+      ? JSON.parse(JSON.stringify(initialSnapshot.account))
+      : manualAccount(),
+  ),
+  ready = ref(!!initialSnapshot),
   fatal = ref(""),
   saving = ref(false),
   message = ref(""),
   error = ref("");
-let revision = 0;
-const selected = ref("sh510300"),
+let revision = initialSnapshot?.revision ?? 0;
+const selected = ref(props.symbol ?? account.value.selectedId),
   mode = ref<ChartMode>("intraday"),
-  tab = ref("holdings"),
+  tab = ref(props.embedded ? (props.initialTab ?? "trades") : "holdings"),
   modal = ref<"cash" | "security" | "opening" | "restore" | "history" | "">("");
 const historyTarget = ref<HistoryTarget>();
 const tradeTypeLabels = computed(() => tradeLabels(account.value.entries));
@@ -260,8 +267,83 @@ const valuation = computed(() => {
     stale,
   };
 });
+const tradePriorHolding = computed(() => {
+  try {
+    const time = recordTime();
+    return replay(
+      {
+        ...account.value,
+        entries: account.value.entries.filter((e) => e.time <= time),
+      },
+      shanghaiDate(new Date(time)),
+    ).positions[selected.value];
+  } catch {
+    return undefined;
+  }
+});
+const tradePriceLimits = computed(() => {
+  const q = quote.value;
+  if (
+    !q ||
+    q.market + q.code !== selected.value ||
+    q.quoteTime.slice(0, 8) !== tradeTime.value.slice(0, 10).replaceAll("-", "")
+  )
+    return null;
+  try {
+    const min = new Decimal(q.limitDown ?? "0"),
+      max = new Decimal(q.limitUp ?? "0");
+    if (
+      !min.isFinite() ||
+      !max.isFinite() ||
+      min.lte(0) ||
+      max.lt(min) ||
+      max.gt(1000000)
+    )
+      return null;
+    return { min: q.limitDown!, max: q.limitUp! };
+  } catch {
+    return null;
+  }
+});
+function stepTradeInput(field: "price" | "quantity", direction: number) {
+  try {
+    const price = field === "price";
+    const min = price ? (tradePriceLimits.value?.min ?? priceTick.value) : "1";
+    const max = price
+      ? (tradePriceLimits.value?.max ?? "1000000")
+      : "1000000000";
+    const current = new Decimal(
+      (price ? orderPrice.value : orderQty.value) || min,
+    );
+    if (!current.isFinite()) return;
+    const next = Decimal.min(
+      max,
+      Decimal.max(
+        min,
+        current.plus(
+          new Decimal(price ? priceTick.value : "100").mul(direction),
+        ),
+      ),
+    );
+    if (price) {
+      orderPrice.value = next.toFixed(priceDecimals.value);
+      tradePriceLocked.value = true;
+    } else orderQty.value = next.toFixed(0);
+  } catch {
+    /* Keep invalid input available for correction. */
+  }
+}
 function previewOrder(direction: "buy" | "sell") {
   try {
+    const limits = tradePriceLimits.value;
+    if (
+      limits &&
+      (new Decimal(orderPrice.value).lt(limits.min) ||
+        new Decimal(orderPrice.value).gt(limits.max))
+    )
+      throw new Error(
+        `成交价须在跌停价 ${limits.min} 与涨停价 ${limits.max} 之间`,
+      );
     const value = draftRecord(
       account.value,
       selected.value,
@@ -272,7 +354,20 @@ function previewOrder(direction: "buy" | "sell") {
       tradeNote.value,
       feeSource.value === "actual" ? { ...actualFees } : undefined,
     );
-    return { value, error: "" };
+    // Preview immediately after this fill, including for backdated records.
+    const holding = replay(
+      {
+        ...account.value,
+        entries: [
+          ...account.value.entries.filter(
+            (item) => item.time <= value.entry.time,
+          ),
+          value.entry,
+        ],
+      },
+      value.entry.date,
+    ).positions[selected.value];
+    return { value, holding, error: "" };
   } catch (e) {
     return { value: null, error: String(e instanceof Error ? e.message : e) };
   }
@@ -281,40 +376,6 @@ const orderPreviews = computed(() => ({
   buy: previewOrder("buy"),
   sell: previewOrder("sell"),
 }));
-const sellProfitPreview = computed(() => {
-  const preview = orderPreviews.value.sell.value;
-  if (!preview) return null;
-  try {
-    const entry = preview.entry;
-    const prior = replay(
-      {
-        ...account.value,
-        entries: account.value.entries.filter(
-          (item) => item.time <= entry.time,
-        ),
-      },
-      entry.date,
-    ).positions[selected.value];
-    let remaining = new Decimal(entry.quantity),
-      fifoCost = new Decimal(0);
-    for (const lot of prior?.lots ?? []) {
-      if (remaining.lte(0)) break;
-      const quantity = new Decimal(lot.quantity);
-      const taken = Decimal.min(remaining, quantity);
-      fifoCost = fifoCost.plus(new Decimal(lot.cost).mul(taken).div(quantity));
-      remaining = remaining.minus(taken);
-    }
-    if (remaining.gt(0)) return null;
-    const profit = new Decimal(entry.fees!.cash).minus(fifoCost);
-    return {
-      cost: fifoCost.toFixed(2),
-      profit: profit.toFixed(2),
-      percent: fifoCost.gt(0) ? profit.div(fifoCost).mul(100).toFixed(2) : null,
-    };
-  } catch {
-    return null;
-  }
-});
 function fillAvailablePosition() {
   const available = position.value?.available;
   if (available && new Decimal(available).gt(0)) orderQty.value = available;
@@ -709,6 +770,7 @@ async function placeOrder(direction: "buy" | "sell") {
           feeSource.value === "actual" ? { ...actualFees } : undefined,
         );
         insertRecord(a, entry);
+        if (a.workspace) addToWatchlist(a.workspace, [entry.securityId]);
       }, "历史成交已记录，仅更新本机账本，不发送委托")
     ) {
       orderSaved.value = true;
@@ -777,8 +839,7 @@ async function addSecurity() {
       if (a.securities.some((x) => x.id === s.id))
         throw new Error("该证券已在自选列表");
       a.securities.push(s);
-      if (a.workspace && !a.workspace.watchlist.includes(s.id))
-        a.workspace.watchlist.push(s.id);
+      if (a.workspace) addToWatchlist(a.workspace, [s.id]);
       a.selectedId = s.id;
     })
   ) {
@@ -869,10 +930,12 @@ async function restore() {
 }
 onMounted(async () => {
   try {
-    const loaded = await loadAccount();
-    account.value = upgradeAccount(loaded.account);
-    revision = loaded.revision;
-    selected.value = account.value.selectedId;
+    if (!initialSnapshot) {
+      const loaded = await loadAccount();
+      account.value = upgradeAccount(loaded.account);
+      revision = loaded.revision;
+      selected.value = account.value.selectedId;
+    }
     Object.assign(feeForms, JSON.parse(JSON.stringify(account.value.profiles)));
     ready.value = true;
     if (props.embedded) {
@@ -905,7 +968,7 @@ onMounted(async () => {
         }
         draftReady.value = !draftError.value;
         await nextTick();
-        orderPriceInput.value?.focus();
+        orderPriceInput.value?.focus({ preventScroll: true });
       }
     }
     if (security.value && !props.embedded)
@@ -1008,7 +1071,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
       'record-embedded': action === 'record',
     }"
   >
-    <header class="topbar">
+    <header v-if="!embedded" class="topbar">
       <div class="brand">
         <span class="brand-symbol">T</span>
         <h1>T刻<span>证券账户账本</span></h1>
@@ -1021,7 +1084,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
       ><button class="subtle" @click="tab = 'backup'">备份账户</button>
       <button class="primary" @click="modal = 'cash'">＋ 资金流水</button>
     </header>
-    <section class="account-strip" aria-label="账户账面概况">
+    <section v-if="!embedded" class="account-strip" aria-label="账户账面概况">
       <div>
         <span>账面总资产</span><strong>{{ money(valuation.total) }}</strong
         ><small v-if="valuation.missing"
@@ -1071,8 +1134,8 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
       "
       kind="warning"
     />
-    <div class="trading-layout">
-      <aside class="watchlist panel">
+    <div v-if="!embedded || action === 'record'" class="trading-layout">
+      <aside v-if="!embedded" class="watchlist panel">
         <div class="section-heading">
           <h2>自选 / 持仓</h2>
           <button
@@ -1120,7 +1183,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           证券与持仓保存在本机。<br />示例自选不代表持仓或推荐。
         </div>
       </aside>
-      <section v-if="security" class="market panel">
+      <section v-if="!embedded && security" class="market panel">
         <div class="instrument">
           <div>
             <h2>
@@ -1222,20 +1285,70 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               </button>
             </details>
             <div class="form-grid compact trade-main-fields">
-              <label
-                >成交价 · 元<input
-                  ref="orderPriceInput"
-                  v-model="orderPrice"
-                  @input="tradePriceLocked = true"
-                  aria-label="成交价"
-                  inputmode="decimal"
-                  placeholder="输入已成交价格" /></label
-              ><label
-                >成交股数 / 份数<input
-                  v-model="orderQty"
-                  aria-label="成交股数"
-                  inputmode="numeric"
-              /></label>
+              <div class="step-field">
+                <label class="step-label" for="trade-entry-price"
+                  >成交价 · 元</label
+                >
+                <div class="step-control">
+                  <button
+                    type="button"
+                    :aria-label="`成交价减少${priceTick}`"
+                    @click="stepTradeInput('price', -1)"
+                  >
+                    −
+                  </button>
+                  <input
+                    id="trade-entry-price"
+                    ref="orderPriceInput"
+                    v-model="orderPrice"
+                    @input="tradePriceLocked = true"
+                    @keydown.up.prevent="stepTradeInput('price', 1)"
+                    @keydown.down.prevent="stepTradeInput('price', -1)"
+                    aria-label="成交价"
+                    inputmode="decimal"
+                    :min="tradePriceLimits?.min ?? priceTick"
+                    :max="tradePriceLimits?.max ?? '1000000'"
+                    :step="priceTick"
+                    placeholder="输入已成交价格"
+                  />
+                  <button
+                    type="button"
+                    :aria-label="`成交价增加${priceTick}`"
+                    @click="stepTradeInput('price', 1)"
+                  >
+                    ＋
+                  </button>
+                </div>
+              </div>
+              <div class="step-field">
+                <label class="step-label" for="trade-entry-quantity"
+                  >成交股数 / 份数</label
+                >
+                <div class="step-control">
+                  <button
+                    type="button"
+                    aria-label="成交股数减少100"
+                    @click="stepTradeInput('quantity', -1)"
+                  >
+                    −
+                  </button>
+                  <input
+                    id="trade-entry-quantity"
+                    v-model="orderQty"
+                    aria-label="成交股数"
+                    inputmode="numeric"
+                    @keydown.up.prevent="stepTradeInput('quantity', 1)"
+                    @keydown.down.prevent="stepTradeInput('quantity', -1)"
+                  />
+                  <button
+                    type="button"
+                    aria-label="成交股数增加100"
+                    @click="stepTradeInput('quantity', 1)"
+                  >
+                    ＋
+                  </button>
+                </div>
+              </div>
               <label class="trade-time"
                 >发生时间<input
                   v-model="tradeTime"
@@ -1243,6 +1356,13 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   step="1"
               /></label>
             </div>
+            <p class="trade-price-limits">
+              {{
+                tradePriceLimits
+                  ? `跌停 ${tradePriceLimits.min} · 涨停 ${tradePriceLimits.max} 元`
+                  : "暂无成交当日涨跌停价，请按实际成交价录入"
+              }}
+            </p>
             <div class="trade-price-follow">
               <span>{{
                 tradePriceLocked
@@ -1283,7 +1403,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             </div>
             <div class="quantity-shortcuts">
               <button
-                v-for="q in [100, 200, 500, 1000]"
+                v-for="q in [100, 200, 500, 800, 1000, 1500, 2000, 3000]"
                 :key="q"
                 type="button"
                 :class="{ chosen: orderQty === String(q) }"
@@ -1365,28 +1485,50 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                     direction === "buy" ? "买入总支出" : "卖出净收入"
                   }}（元）</span
                 >
-                <strong>{{
+                <strong class="trade-cash-preview">{{
                   money(orderPreviews[direction].value?.entry.fees?.cash)
                 }}</strong>
-                <small
-                  >含手续费
+                <small class="trade-fees-preview"
+                  >费用
                   {{ money(orderPreviews[direction].value?.entry.fees?.total) }}
-                  元</small
+                  元（已计入）</small
                 >
                 <div
-                  v-if="direction === 'sell' && sellProfitPreview"
-                  class="trade-profit-preview"
-                  title="本次收益＝卖出净收入－本次卖出数量匹配的FIFO持仓成本；收益率＝本次收益÷FIFO成本"
+                  class="trade-cost-preview"
+                  title="按本笔成交发生时点计算：本轮买入总支出（含期初成本及手续费）减去本轮卖出净收入，再除以剩余股数；与持仓页摊薄成本一致，可为负数。"
                 >
-                  <span>本次收益（FIFO）</span>
-                  <b :class="tone(sellProfitPreview.profit)">{{
-                    money(sellProfitPreview.profit)
-                  }}</b>
-                  <small :class="tone(sellProfitPreview.percent)">{{
-                    percent(sellProfitPreview.percent)
-                  }}</small>
+                  <span
+                    >{{
+                      direction === "buy" ? "买入后" : "卖出后"
+                    }}持仓成本</span
+                  >
+                  <b class="trade-cost-change">
+                    <span>{{
+                      tradePriorHolding &&
+                      new Decimal(tradePriorHolding.quantity).gt(0)
+                        ? money(tradePriorHolding.dilutedCost, 4)
+                        : "无持仓"
+                    }}</span>
+                    <span aria-hidden="true"> → </span>
+                    <span>{{
+                      orderPreviews[direction].holding?.quantity === "0"
+                        ? "已清仓"
+                        : money(
+                            orderPreviews[direction].holding?.dilutedCost,
+                            4,
+                          )
+                    }}</span>
+                  </b>
+                  <small>元/股 · 摊薄成本 · 含费用</small>
                 </div>
-                <p v-if="orderPreviews[direction].error" class="order-hint">
+                <p
+                  v-if="
+                    orderPreviews[direction].error &&
+                    orderPreviews[direction].error !==
+                      '历史持仓不足，请先补录更早的买入或期初持仓'
+                  "
+                  class="order-hint"
+                >
                   {{ orderPreviews[direction].error }}
                 </p>
                 <button
@@ -1394,6 +1536,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   class="submit-order"
                   :class="direction"
                   :disabled="
+                    (action === 'record' && !draftReady) ||
                     !orderPreviews[direction].value ||
                     saving ||
                     orderBusy ||
@@ -1428,7 +1571,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
         </button>
       </aside>
     </div>
-    <section class="details panel">
+    <section v-if="!embedded || !action" class="details panel">
       <nav class="details-tabs" aria-label="账户明细">
         <button
           v-for="t in [
@@ -1804,9 +1947,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   }}</span
                   ><button
                     v-if="priceLocked.buyPrice"
+                    aria-label="买入价跟随行情"
                     @click="resumePrice('buyPrice')"
                   >
-                    买入价跟随行情
+                    跟随行情
                   </button>
                 </div>
               </StepField>
@@ -1820,7 +1964,15 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               >
                 <div class="quantity-shortcuts">
                   <button
-                    v-for="n in ['100', '200', '500', '1000']"
+                    v-for="n in [
+                      '100',
+                      '200',
+                      '500',
+                      '1000',
+                      '1500',
+                      '2000',
+                      '2500',
+                    ]"
                     :key="n"
                     :aria-label="`买入数量设为${n}`"
                     @click="plan.buyQty = n"
@@ -1847,9 +1999,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   }}</span
                   ><button
                     v-if="priceLocked.sellPrice"
+                    aria-label="卖出价跟随行情"
                     @click="resumePrice('sellPrice')"
                   >
-                    卖出价跟随行情
+                    跟随行情
                   </button>
                 </div>
               </StepField>
@@ -1863,7 +2016,15 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               >
                 <div class="quantity-shortcuts">
                   <button
-                    v-for="n in ['100', '200', '500', '1000']"
+                    v-for="n in [
+                      '100',
+                      '200',
+                      '500',
+                      '1000',
+                      '1500',
+                      '2000',
+                      '2500',
+                    ]"
                     :key="n"
                     :aria-label="`卖出数量设为${n}`"
                     @click="plan.sellQty = n"
@@ -1873,59 +2034,112 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 </div>
               </StepField>
             </div>
-            <p class="footnote">
-              未手改价格每3秒跟随行情；加减价格即锁定。仅测算，不写入账户。未配对数量按增减仓计算；不校验资金、可卖数量及涨跌停。
-            </p>
           </div>
           <div v-if="forwardResult.result" class="planner-results">
-            <div class="plan-kpis">
-              <div>
-                <span>配对 {{ forwardResult.result.matched }} 股/份净收益</span
-                ><strong :class="tone(forwardResult.result.profit)">{{
-                  money(forwardResult.result.profit)
-                }}</strong>
+            <section class="plan-net-profit" aria-label="本次做T净收益">
+              <div class="plan-result-label">
+                本次做T净收益 <span>已扣费用</span>
               </div>
-              <div>
-                <span>净增减仓 / 现金流</span
-                ><b
-                  >{{ forwardResult.result.change }} /
-                  {{ money(forwardResult.result.cashFlow) }}</b
+              <strong :class="tone(forwardResult.result.profit)"
+                >{{ money(forwardResult.result.profit)
+                }}<small>元</small></strong
+              >
+              <p>
+                买卖配对 {{ forwardResult.result.matched }} 股/份<span
+                  v-if="forwardResult.result.change !== '0'"
                 >
-              </div>
-              <div>
-                <span>完整两笔手续费</span
-                ><b>{{ money(forwardResult.result.fees) }}</b>
-              </div>
-              <div>
-                <span>测算后持仓 / 成本金额</span
-                ><b
-                  >{{ forwardResult.holding?.quantity }} /
-                  {{ money(forwardResult.holding?.netInvestment) }}</b
+                  · 未配对部分计入增减仓</span
                 >
-              </div>
-              <div>
-                <span>摊薄成本 / 持仓市值</span
-                ><b
-                  >{{ forwardResult.holding?.dilutedCost ?? "—" }} /
-                  {{ money(forwardResult.holding?.marketValue) }}</b
+              </p>
+            </section>
+            <div class="plan-holding-overview">
+              <section class="plan-holding-cost" aria-label="交易后持仓成本">
+                <span class="plan-result-label"
+                  >交易后持仓成本 <small>元/股</small></span
                 >
-              </div>
-              <div>
-                <span>持仓收益 / 收益率</span
-                ><b :class="tone(forwardResult.holding?.profit)"
-                  >{{ money(forwardResult.holding?.profit) }} /
-                  {{ percent(forwardResult.holding?.profitPercent ?? null) }}</b
+                <div class="plan-cost-comparison">
+                  <span>{{ money(position?.dilutedCost, 4) }}</span
+                  ><i>→</i>
+                  <strong>{{
+                    forwardResult.holding?.quantity === "0"
+                      ? "已清仓"
+                      : money(forwardResult.holding?.dilutedCost, 4)
+                  }}</strong>
+                </div>
+                <p>每股摊薄成本 · 含费用及卖出回款</p>
+              </section>
+              <section class="plan-market-value" aria-label="交易后持仓市值">
+                <span class="plan-result-label"
+                  >交易后持仓市值 <small>元</small></span
                 >
-              </div>
+                <strong>{{ money(forwardResult.holding?.marketValue) }}</strong>
+                <p>
+                  {{ forwardResult.holding?.quantity ?? "—" }} 股/份 × 参考现价
+                  {{ money(quote?.latest, priceDecimals) }} 元
+                </p>
+              </section>
             </div>
-            <p class="footnote">
-              配对毛收益 {{ money(forwardResult.result.gross) }} − 分摊费用
-              {{ money(forwardResult.result.allocatedFees) }}；完整买入支出
-              {{ money(forwardResult.result.buy.cash) }}，完整卖出净收入
-              {{ money(forwardResult.result.sell.cash) }}。{{
-                forwardResult.holding?.error
-              }}
+            <p v-if="forwardResult.holding?.error" class="plan-result-note">
+              {{ forwardResult.holding.error }}
             </p>
+            <details class="plan-calculation-details">
+              <summary>查看费用与计算明细</summary>
+              <p>
+                仅测算，不写入账户；未配对数量按增减仓计算，不校验资金、可卖数量及涨跌停。
+              </p>
+              <dl>
+                <div>
+                  <dt>配对毛收益</dt>
+                  <dd>{{ money(forwardResult.result.gross) }} 元</dd>
+                </div>
+                <div>
+                  <dt>配对分摊费用</dt>
+                  <dd>{{ money(forwardResult.result.allocatedFees) }} 元</dd>
+                </div>
+                <div>
+                  <dt>完整买入支出</dt>
+                  <dd>{{ money(forwardResult.result.buy.cash) }} 元</dd>
+                </div>
+                <div>
+                  <dt>完整卖出净收入</dt>
+                  <dd>{{ money(forwardResult.result.sell.cash) }} 元</dd>
+                </div>
+                <div>
+                  <dt>完整两笔手续费</dt>
+                  <dd>{{ money(forwardResult.result.fees) }} 元</dd>
+                </div>
+                <div>
+                  <dt>本次净现金流</dt>
+                  <dd>{{ money(forwardResult.result.cashFlow) }} 元</dd>
+                </div>
+                <div>
+                  <dt>持仓数量变化</dt>
+                  <dd>
+                    {{ position?.quantity ?? "0" }} →
+                    {{ forwardResult.holding?.quantity ?? "—" }} 股/份
+                  </dd>
+                </div>
+                <div>
+                  <dt>交易后本轮净投入</dt>
+                  <dd>{{ money(forwardResult.holding?.netInvestment) }} 元</dd>
+                </div>
+                <div>
+                  <dt>交易后持仓收益</dt>
+                  <dd :class="tone(forwardResult.holding?.profit)">
+                    {{ money(forwardResult.holding?.profit) }} 元
+                  </dd>
+                </div>
+                <div>
+                  <dt>交易后持仓收益率</dt>
+                  <dd>
+                    {{ percent(forwardResult.holding?.profitPercent ?? null) }}
+                  </dd>
+                </div>
+              </dl>
+              <p>
+                做T净收益＝配对毛收益－配对分摊费用。持仓市值按参考现价估算，现金流包含本金回收。
+              </p>
+            </details>
           </div>
           <p v-else class="empty">{{ forwardResult.error }}</p>
         </section>
@@ -2170,7 +2384,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
         </dl>
       </div>
     </section>
-    <footer class="terminal-footer">
+    <footer v-if="!embedded" class="terminal-footer">
       <span>T刻 0.4.0 · 手工证券账本</span
       ><span
         >不保证行情、成交或实际盈利 ·

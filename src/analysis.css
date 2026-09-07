@@ -1,0 +1,550 @@
+.desk-page:has(> .pnl-analysis) {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pnl-analysis {
+  --pnl-gain: #c6414b;
+  --pnl-loss: #48a579;
+  --pnl-muted: #7b8798;
+  color: #28374b;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding-bottom: 12px;
+}
+.pnl-analysis .gain {
+  color: var(--pnl-gain);
+}
+.pnl-analysis .loss {
+  color: var(--pnl-loss);
+}
+.pnl-analysis .flat,
+.pnl-analysis .unknown {
+  color: var(--pnl-muted);
+}
+.pnl-analysis h2,
+.pnl-analysis h3,
+.pnl-analysis h4,
+.pnl-analysis p {
+  margin: 0;
+}
+.pnl-analysis h2 {
+  font-size: 20px;
+  letter-spacing: 0.02em;
+}
+.pnl-analysis h3 {
+  font-size: 14px;
+  font-weight: 650;
+}
+.pnl-analysis h4 {
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.pnl-heading,
+.pnl-panel > header,
+.pnl-range-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.pnl-heading p,
+.pnl-calendar-header p {
+  font-size: 12px;
+  color: var(--pnl-muted);
+  margin-top: 5px;
+}
+.pnl-data-origin,
+.pnl-range-label {
+  color: var(--pnl-muted);
+  font-size: 11px;
+}
+.pnl-range-toolbar {
+  flex-wrap: wrap;
+}
+.pnl-segments {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  background: #edf1f7;
+  border-radius: 7px;
+}
+.pnl-segments button {
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pnl-segments button.active {
+  background: white;
+  color: #315fab;
+  border-color: #d6e0f0;
+  box-shadow: 0 1px 3px #273b5810;
+}
+.pnl-date-range,
+.pnl-calendar-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pnl-date-range input,
+.pnl-calendar-controls input,
+.pnl-calendar-controls select {
+  width: auto;
+  height: 32px;
+  font-size: 12px;
+}
+.pnl-metrics {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr 1fr;
+  background: #fff;
+  border: 1px solid #dce4ef;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pnl-metric {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-left: 1px solid #e8edf4;
+  min-width: 0;
+}
+.pnl-metric:first-child {
+  border-left: 0;
+}
+.pnl-metric span {
+  font-size: 12px;
+  color: #66748a;
+}
+.pnl-metric strong {
+  font:
+    600 23px "SFMono-Regular",
+    Consolas,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pnl-metric small {
+  font-size: 10px;
+  color: var(--pnl-muted);
+  line-height: 1.5;
+}
+.pnl-total {
+  background: #f7f9fd;
+}
+.pnl-outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 32px;
+  padding: 2px 4px;
+}
+.pnl-outcomes > div {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 5px 12px;
+  align-items: baseline;
+}
+.pnl-outcomes span {
+  font-size: 12px;
+  color: #66748a;
+}
+.pnl-outcomes b {
+  font:
+    600 16px "SFMono-Regular",
+    Consolas,
+    monospace;
+}
+.pnl-outcomes small {
+  grid-column: 1 / -1;
+  color: var(--pnl-muted);
+  font-size: 10px;
+}
+.pnl-analysis .pnl-note {
+  font-size: 11px;
+  color: var(--pnl-muted);
+  line-height: 1.7;
+}
+.pnl-insights {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.pnl-panel {
+  background: #fff;
+  border: 1px solid #dce4ef;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 0;
+}
+.pnl-panel > header {
+  margin-bottom: 14px;
+}
+.pnl-panel > header > span {
+  font-size: 11px;
+  color: var(--pnl-muted);
+}
+.pnl-trend {
+  width: 100%;
+  height: 190px;
+  overflow: visible;
+}
+.pnl-trend text {
+  font:
+    10px "SFMono-Regular",
+    Consolas,
+    monospace;
+  fill: #7b8798;
+}
+.pnl-trend path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.pnl-chart-zero {
+  stroke: #dce4ef;
+  stroke-dasharray: 4 4;
+}
+.pnl-trend circle {
+  fill: #527cb9;
+  opacity: 0;
+}
+.pnl-trend circle:hover {
+  opacity: 1;
+  r: 5;
+}
+.pnl-analysis table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pnl-analysis th {
+  color: #7b8798;
+  font-size: 11px;
+  font-weight: 500;
+  background: #f6f8fb;
+}
+.pnl-analysis th,
+.pnl-analysis td {
+  text-align: right;
+  padding: 9px 10px;
+  border-bottom: 1px solid #edf1f6;
+  white-space: nowrap;
+}
+.pnl-analysis th:first-child,
+.pnl-analysis td:first-child {
+  text-align: left;
+}
+.pnl-analysis td:not(:first-child) {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pnl-analysis td small {
+  display: block;
+  font-size: 10px;
+  color: var(--pnl-muted);
+  margin-top: 4px;
+}
+.pnl-contribution-scroll {
+  max-height: 225px;
+  overflow: auto;
+}
+.pnl-contribution th {
+  position: sticky;
+  top: 0;
+}
+.pnl-period-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.pnl-period-cell {
+  height: auto;
+  min-height: 104px;
+  padding: 16px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  background: #fafbfd;
+  border-color: #e5ebf3;
+}
+.pnl-period-cell strong {
+  font:
+    600 20px "SFMono-Regular",
+    Consolas,
+    monospace;
+}
+.pnl-period-cell small {
+  color: var(--pnl-muted);
+  font-size: 10px;
+  min-height: 12px;
+}
+.pnl-month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.pnl-month {
+  padding: 8px;
+  border: 1px solid #e4eaf2;
+  border-radius: 6px;
+  background: #fff;
+}
+.pnl-month.is-selected {
+  border-top: 3px solid #527cb9;
+  padding-top: 6px;
+}
+.pnl-month > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pnl-month header strong {
+  font:
+    600 13px "SFMono-Regular",
+    Consolas,
+    monospace;
+}
+.pnl-month .pnl-month-note {
+  min-height: 14px;
+  margin: 4px 0 6px;
+  color: var(--pnl-muted);
+  font-size: 10px;
+}
+.pnl-weekdays,
+.pnl-days {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+}
+.pnl-weekdays {
+  margin-bottom: 4px;
+  text-align: center;
+  color: #8693a5;
+  font-size: 10px;
+}
+.pnl-days .pnl-day {
+  width: 100%;
+  min-width: 0;
+  height: 50px;
+  padding: 4px 1px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+}
+.pnl-day > span {
+  font-size: 10px;
+  line-height: 11px;
+  color: #65758b;
+}
+.pnl-day > small {
+  flex-shrink: 0;
+  line-height: 11px;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font:
+    9px "SFMono-Regular",
+    Consolas,
+    monospace;
+}
+.pnl-days .pnl-day.gain {
+  background: #fcf0f1;
+}
+.pnl-days .pnl-day.loss {
+  background: #edf7f1;
+}
+.pnl-days .pnl-day.today > span {
+  color: #315fab;
+  font-weight: 750;
+}
+.pnl-days .pnl-day.selected {
+  border-color: #527cb9;
+  box-shadow: inset 0 0 0 1px #527cb9;
+}
+.pnl-days .pnl-day:disabled {
+  opacity: 0.65;
+}
+.pnl-calendar > .pnl-note {
+  margin-top: 10px;
+}
+.pnl-day-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 0 0 14px;
+  font-size: 12px;
+}
+.pnl-day-totals b {
+  font:
+    600 18px "SFMono-Regular",
+    Consolas,
+    monospace;
+  margin-left: 10px;
+}
+.pnl-day-records {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 20px;
+}
+.pnl-day-records p {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.pnl-day-records small {
+  display: block;
+  font-size: 10px;
+  color: var(--pnl-muted);
+  margin-top: 4px;
+}
+.pnl-analysis .pnl-warning {
+  color: #956326;
+  background: #fff9ed;
+  border: 1px solid #efdfbd;
+  border-radius: 5px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pnl-warning summary {
+  cursor: pointer;
+}
+.pnl-warning ul {
+  max-height: 130px;
+  overflow: auto;
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.pnl-warning button {
+  margin-top: 8px;
+}
+.pnl-analysis .pnl-empty {
+  color: var(--pnl-muted);
+  font-size: 12px;
+  padding: 30px 12px;
+  text-align: center;
+}
+.pnl-loading {
+  color: #527cb9;
+  font-size: 12px;
+}
+@media (max-width: 1000px) {
+  .pnl-month-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pnl-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pnl-metric:nth-child(3) {
+    border-left: 0;
+  }
+  .pnl-metric:nth-child(n + 3) {
+    border-top: 1px solid #e8edf4;
+  }
+  .pnl-insights {
+    grid-template-columns: 1fr;
+  }
+  .pnl-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+@media (max-width: 700px) {
+  .pnl-month-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pnl-period-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .pnl-calendar-header {
+    flex-wrap: wrap;
+  }
+  .pnl-metric strong {
+    font-size: 19px;
+  }
+  .pnl-metric {
+    padding: 12px;
+  }
+  .pnl-day-records {
+    grid-template-columns: 1fr;
+  }
+  .pnl-segments button {
+    padding: 0 9px;
+  }
+}
+
+.pnl-total-return b {
+  font:
+    600 16px "SFMono-Regular",
+    Consolas,
+    monospace;
+  margin-left: 6px;
+}
+.pnl-month-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pnl-month-return,
+.pnl-period-return {
+  font:
+    500 12px "SFMono-Regular",
+    Consolas,
+    monospace;
+}
+.pnl-day-return {
+  min-height: 11px;
+}
+
+/* Native modal top layer keeps the page inert and traps keyboard focus. */
+.pnl-analysis .pnl-day-detail {
+  width: min(880px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 0;
+  color: inherit;
+  box-shadow: 0 20px 64px #20314933;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pnl-day-detail::backdrop {
+  background: rgba(32, 49, 73, 0.3);
+}
+.pnl-day-dialog-content {
+  padding: 22px;
+}
+.pnl-day-dialog-content > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.pnl-day-dialog-content > header button {
+  flex-shrink: 0;
+}
+@media (max-width: 700px) {
+  .pnl-analysis .pnl-day-detail {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+  .pnl-day-dialog-content {
+    padding: 16px;
+  }
+}

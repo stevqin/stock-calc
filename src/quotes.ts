@@ -10,6 +10,8 @@ export interface Quote {
   fetchedAt: string;
   kind: "stock" | "etf" | "unknown";
   previousClose?: string | null;
+  limitUp?: string | null;
+  limitDown?: string | null;
   open?: string | null;
   high?: string | null;
   low?: string | null;

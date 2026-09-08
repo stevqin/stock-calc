@@ -428,3 +428,27 @@ describe("先输入再选择买卖", () => {
     expect(writeDraft).not.toHaveBeenCalledWith(`trade:${id}:buy`, null);
   });
 });
+
+it("成交价旁使用当前行情昨收计算涨跌幅", async () => {
+  marketQuotes[id] = {
+    market: "sh",
+    code: "600519",
+    name: "贵州茅台",
+    kind: "stock",
+    latest: "12",
+    previousClose: "10",
+    bid: null,
+    ask: null,
+    quoteTime: "20260828150000",
+    fetchedAt: "2026-08-28T07:00:00Z",
+  };
+  await start();
+  await wrapper.get('[aria-label="成交价"]').setValue("11");
+  expect(
+    wrapper.get('label[for="trade-entry-price"] .price-change').text(),
+  ).toBe("较昨收 +10.00%");
+  await wrapper.get('[aria-label="成交价"]').setValue("9");
+  expect(
+    wrapper.get('label[for="trade-entry-price"] .price-change').text(),
+  ).toBe("较昨收 -10.00%");
+});

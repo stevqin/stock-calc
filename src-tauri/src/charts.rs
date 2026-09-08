@@ -104,8 +104,13 @@ pub async fn fetch_chart(
     market: String,
     code: String,
     mode: String,
+    background: Option<bool>,
 ) -> Result<Value, String> {
-    if !window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(true) {
+    if !crate::market_request_allowed(
+        background.unwrap_or(false) && mode == "daily-raw",
+        window.is_visible().unwrap_or(false),
+        window.is_minimized().unwrap_or(true),
+    ) {
         return Err("窗口隐藏，图表刷新已暂停".into());
     }
     request_chart(&client, &market, &code, &mode).await
@@ -148,7 +153,7 @@ async fn request_chart(
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| "图表响应不是JSON")?;
     parse_chart(value, &symbol, &mode)
 }
-fn analysis_history_url(market: &str, code: &str, year: i32) -> Result<String, String> {
+pub(crate) fn analysis_history_url(market: &str, code: &str, year: i32) -> Result<String, String> {
     use chrono::Datelike;
     let current_year = (chrono::Utc::now() + chrono::Duration::hours(8)).year();
     if (!super::valid_symbol(market, code) && !(market == "sh" && code == "000001"))
@@ -158,15 +163,19 @@ fn analysis_history_url(market: &str, code: &str, year: i32) -> Result<String, S
     }
     Ok(format!("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={market}{code},day,{}-12-01,{year}-12-31,400,", year - 1))
 }
-fn parse_analysis_history(value: Value, symbol: &str, year: i32) -> Result<Value, String> {
+pub(crate) fn parse_analysis_history(
+    value: Value,
+    symbol: &str,
+    year: i32,
+) -> Result<Value, String> {
     let source = &value["data"][symbol];
     if source.get("qfqday").is_some() || source.get("hfqday").is_some() {
         return Err("历史分析需要不复权行情".into());
     }
     let mut result = parse_chart(value, symbol, "daily-raw")?;
     let bars = result["bars"].as_array_mut().ok_or("历史行情缺失")?;
-    if bars.len() > 400 {
-        return Err("历史行情条数超限".into());
+    if bars.is_empty() || bars.len() > 400 {
+        return Err("历史行情为空或条数超限".into());
     }
     let start = format!("{}-12-01", year - 1);
     let end = format!("{year}-12-31");
@@ -223,6 +232,50 @@ fn parse_eastmoney_history(value: Value, symbol: &str, year: i32) -> Result<Valu
     // strict identity, date, bounds and price validation as the primary source.
     parse_analysis_history(json!({"code":0,"data":{symbol:{"day":rows}}}), symbol, year)
 }
+fn sina_history_url(market: &str, code: &str, year: i32) -> Result<String, String> {
+    analysis_history_url(market, code, year)?;
+    // This endpoint serves raw daily OHLCV, capped at 1023 sessions.
+    Ok(format!("https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol={market}{code}&scale=240&ma=no&datalen=1023"))
+}
+fn parse_sina_history(value: Value, symbol: &str, year: i32) -> Result<Value, String> {
+    let rows = value.as_array().ok_or("新浪历史日线缺失")?;
+    if rows.is_empty() || rows.len() > 1023 {
+        return Err("新浪历史日线为空或条数超限".into());
+    }
+    let start = format!("{}-12-01", year - 1);
+    let end = format!("{year}-12-31");
+    let mut normalized = Vec::new();
+    let mut earliest = "9999-12-31";
+    for row in rows {
+        let date = row["day"].as_str().ok_or("新浪日线日期缺失")?;
+        if date.len() != 10 || chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err() {
+            return Err("新浪日线日期无效".into());
+        }
+        earliest = earliest.min(date);
+        if date < start.as_str() || date > end.as_str() {
+            continue;
+        }
+        // Sina reports shares; ChartData uses lots of 100 shares.
+        let volume = required(&row["volume"])?;
+        let lots = volume.parse::<f64>().map_err(|_| "新浪成交量无效")? / 100.0;
+        normalized.push(json!([
+            date,
+            row["open"],
+            row["close"],
+            row["high"],
+            row["low"],
+            lots.to_string()
+        ]));
+    }
+    if rows.len() == 1023 && earliest > start.as_str() {
+        return Err("新浪日线覆盖范围不足，不能作为完整年度行情".into());
+    }
+    parse_analysis_history(
+        json!({"code":0,"data":{symbol:{"day":normalized}}}),
+        symbol,
+        year,
+    )
+}
 async fn history_json(client: &reqwest::Client, url: &str) -> Result<Value, String> {
     let mut response = client
         .get(url)
@@ -264,7 +317,19 @@ async fn request_analysis_history(
                 Ok(value) => parse_eastmoney_history(value, &symbol, year),
                 Err(error) => Err(error),
             };
-            fallback.map_err(|error| format!("腾讯：{primary_error}；东方财富：{error}"))
+            match fallback {
+                Ok(data) => Ok(data),
+                Err(backup_error) => {
+                    let url = sina_history_url(market, code, year)?;
+                    let result = match history_json(client, &url).await {
+                        Ok(value) => parse_sina_history(value, &symbol, year),
+                        Err(error) => Err(error),
+                    };
+                    result.map_err(|error| {
+                        format!("腾讯：{primary_error}；东方财富：{backup_error}；新浪：{error}")
+                    })
+                }
+            }
         }
     }
 }
@@ -284,6 +349,40 @@ pub async fn fetch_analysis_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_primary_history_is_an_error_so_fallback_runs() {
+        assert!(parse_analysis_history(
+            json!({"code":0,"data":{"sh510300":{"day":[]}}}),
+            "sh510300",
+            2025
+        )
+        .is_err());
+    }
+    #[test]
+    fn sina_history_filters_year_and_normalizes_unadjusted_bars() {
+        let data = json!([
+            {"day":"2026-01-05","open":"12","close":"12","high":"12","low":"12","volume":"100"},
+            {"day":"2025-01-03","open":"10","close":"11","high":"12","low":"9","volume":"12300"},
+            {"day":"2024-12-02","open":"10","close":"10","high":"12","low":"9","volume":"100"},
+            {"day":"2024-11-29","open":"10","close":"10","high":"12","low":"9","volume":"100"}
+        ]);
+        let result = parse_sina_history(data, "sh510300", 2025).unwrap();
+        assert_eq!(result["bars"].as_array().unwrap().len(), 2);
+        assert_eq!(result["bars"][0]["date"], "2024-12-02");
+        assert_eq!(result["bars"][1]["close"], "11");
+        assert_eq!(result["bars"][1]["volume"], "123");
+        assert_eq!(result["adjustment"], "不复权");
+        assert!(parse_sina_history(json!(null), "sh510300", 2025).is_err());
+        assert!(parse_sina_history(json!([]), "sh510300", 2025).is_err());
+        let truncated = json!(vec![
+            json!({"day":"2025-06-01","open":"10","close":"10","high":"10","low":"10","volume":"100"});
+            1023
+        ]);
+        assert!(parse_sina_history(truncated, "sh510300", 2025)
+            .unwrap_err()
+            .contains("覆盖"));
+        assert!(parse_sina_history(json!([{"day":"2025-01-03","open":"10","close":"99","high":"12","low":"9","volume":"100"}]), "sh510300", 2025).is_err());
+    }
     #[test]
     fn fallback_annual_parser_checks_identity_range_and_raw_prices() {
         let data = json!({"rc":0,"data":{"code":"510300","market":1,"klines":["2026-09-07,4.635,4.634,4.649,4.612,9930783","2025-12-01,4.646,4.687,4.688,4.639,5783014"]}});
@@ -351,14 +450,6 @@ mod tests {
                 ("sz", "159915", 2025),
                 ("sh", "000001", 2026),
             ] {
-                let fallback_json =
-                    history_json(&client, &eastmoney_history_url(market, code, year).unwrap())
-                        .await
-                        .unwrap();
-                let fallback =
-                    parse_eastmoney_history(fallback_json, &format!("{market}{code}"), year)
-                        .unwrap();
-                assert!(!fallback["bars"].as_array().unwrap().is_empty());
                 let result = request_analysis_history(&client, market, code, year)
                     .await
                     .unwrap();

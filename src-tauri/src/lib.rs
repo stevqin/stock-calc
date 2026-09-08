@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 mod charts;
 mod fund_flows;
+mod history_store;
 mod search;
+mod status_bar;
 mod storage;
 
 #[derive(Debug, Serialize)]
@@ -170,11 +172,16 @@ fn parse_batch(bytes: &[u8], symbols: &[Symbol]) -> QuoteBatch {
     }
     out
 }
+// Background market data feeds the menu bar even when its owning webview is hidden.
+pub(crate) fn market_request_allowed(background: bool, visible: bool, minimized: bool) -> bool {
+    background || (visible && !minimized)
+}
 #[tauri::command]
 async fn fetch_quotes(
     client: tauri::State<'_, reqwest::Client>,
     window: tauri::WebviewWindow,
     symbols: Vec<Symbol>,
+    background: Option<bool>,
 ) -> Result<QuoteBatch, String> {
     if symbols.is_empty()
         || symbols.len() > 50
@@ -182,7 +189,11 @@ async fn fetch_quotes(
     {
         return Err("一次只允许1至50只范围内证券".into());
     }
-    if !window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(true) {
+    if !market_request_allowed(
+        background.unwrap_or(false),
+        window.is_visible().unwrap_or(false),
+        window.is_minimized().unwrap_or(true),
+    ) {
         return Err("窗口隐藏，行情已暂停".into());
     }
     let joined = symbols
@@ -256,14 +267,39 @@ pub fn run() {
         .expect("HTTP client");
     tauri::Builder::default()
         .manage(client)
-        .setup(storage::initialize)
+        .setup(|app| {
+            storage::initialize(app)?;
+            #[cfg(target_os = "macos")]
+            status_bar::initialize(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (window, event);
+        })
         .invoke_handler(tauri::generate_handler![
+            status_bar::update_status_bar,
+            status_bar::get_status_portfolio,
+            status_bar::get_status_active_index,
+            status_bar::hide_status_panel,
+            status_bar::open_status_main,
+            status_bar::get_status_paused,
+            status_bar::set_status_paused,
+            status_bar::exit_status_app,
             fetch_quote,
             fetch_quotes,
             fund_flows::fetch_fund_flows,
             search::search_securities,
             charts::fetch_chart,
             charts::fetch_analysis_history,
+            history_store::load_analysis_cache,
+            history_store::write_analysis_cache,
+            history_store::clear_analysis_cache,
             storage::load_account,
             storage::save_account,
             storage::export_account,
@@ -297,6 +333,16 @@ mod tests {
         let text = format!("v_sh{}=\"{}\";", code, fields.join("~"));
         let (bytes, _, _) = encoding_rs::GBK.encode(&text);
         bytes.into_owned()
+    }
+    #[test]
+    fn background_market_requests_survive_minimize_and_hide() {
+        for (visible, minimized) in [(true, false), (true, true), (false, false), (false, true)] {
+            assert!(market_request_allowed(true, visible, minimized));
+            assert_eq!(
+                market_request_allowed(false, visible, minimized),
+                visible && !minimized
+            );
+        }
     }
     #[test]
     fn stock_and_etf_gbk_quotes() {

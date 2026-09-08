@@ -4,6 +4,9 @@ export interface ChartData {
   mode: ChartMode;
   adjustment: string;
   fetchedAt: string;
+  source?: string;
+  /** Officially documented suspension, valued at the referenced raw close. */
+  suspensions?: { date: string; referenceDate: string; source: string }[];
   bars: {
     date: string;
     open: string;

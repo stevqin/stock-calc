@@ -32,8 +32,9 @@ function change(direction: number) {
 <template>
   <div class="step-field">
     <label class="step-label" :for="inputId"
-      >{{ label }} <small>{{ unit }}</small></label
-    >
+      >{{ label }} <small>{{ unit }}</small
+      ><slot name="label-suffix"
+    /></label>
     <div class="step-control">
       <button
         type="button"

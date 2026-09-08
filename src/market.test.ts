@@ -86,6 +86,17 @@ describe("批量行情调度", () => {
     await poller.refresh();
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it("原生状态栏唤醒不会绕过行情失败退避", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn().mockRejectedValue(new Error("断网"));
+    poller = new BatchPoller(fetcher, vi.fn(), vi.fn(), () => true);
+    poller.setTargets([symbols[0]]);
+    await vi.advanceTimersByTimeAsync(3000);
+    await poller.refreshIfDue();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
   it("失败后退避重试，不清空已有行情", async () => {
     vi.useFakeTimers();
     const fetcher = vi

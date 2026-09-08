@@ -125,6 +125,18 @@ export function analyzeAccount(
         provenSessions.add(bar.date);
       }
     }
+    for (const event of data.suspensions ?? []) {
+      const reference = closes.get(event.referenceDate);
+      if (
+        event.referenceDate < event.date &&
+        reference &&
+        !closes.has(event.date) &&
+        /^https:\/\//.test(event.source) &&
+        !trades.some((e) => e.securityId === id && e.date === event.date)
+      ) {
+        closes.set(event.date, reference);
+      }
+    }
     closeMaps.set(id, closes);
   }
   for (const quote of Object.values(quotes)) {

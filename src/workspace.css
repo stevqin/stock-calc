@@ -2517,6 +2517,7 @@ body,
   letter-spacing: 0;
 }
 .plan-net-profit p,
+.plan-holding-pnl p,
 .plan-holding-overview p,
 .plan-result-note,
 .plan-calculation-details p {
@@ -2589,16 +2590,55 @@ body,
 
 .planner-forward .planner-results {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 2fr);
-  align-items: start;
-  gap: 12px;
-}
-.plan-holding-overview {
-  padding: 12px 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  align-items: stretch;
   gap: 16px;
 }
-.plan-net-profit {
-  padding: 12px;
+.plan-holding-overview {
+  grid-column: 1 / -1;
+  padding: 0;
+  gap: 16px;
+}
+.plan-net-profit,
+.plan-holding-pnl {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f3f6fc;
+}
+.plan-pnl-values {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 5px 0;
+}
+.plan-pnl-values > strong {
+  font-size: 28px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.plan-pnl-values small {
+  display: inline;
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: inherit;
+}
+.plan-holding-pnl-rate {
+  font-size: 14px;
+  white-space: nowrap;
+}
+.plan-holding-pnl-rate small {
+  margin: 0 5px 0 0;
+  color: #73839a;
+  font-size: 10px;
+}
+.plan-holding-overview > section {
+  padding: 0 14px;
+}
+.plan-holding-overview > section + section {
+  border-left: 1px solid #e6ebf3;
 }
 .plan-net-profit .plan-result-label {
   flex-wrap: wrap;

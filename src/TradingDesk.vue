@@ -9,7 +9,10 @@ import {
   nextTick,
 } from "vue";
 import Decimal from "decimal.js";
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { statusBarFrames, shortNames, type StatusSnapshot } from "./statusBar";
+import { quoteAge } from "./quotes";
 import SecuritiesTable from "./components/SecuritiesTable.vue";
 import FloatingNotice from "./components/FloatingNotice.vue";
 import SummaryHelp from "./components/SummaryHelp.vue";
@@ -824,7 +827,7 @@ async function restore(a: Account) {
 async function clearCache() {
   try {
     await clearMarket();
-    clearAnalysisHistory();
+    await clearAnalysisHistory();
     notify("仅清理行情缓存，账户记录未改变");
     void poller.refresh();
     void flowPoller.refresh();
@@ -832,7 +835,73 @@ async function clearCache() {
     failure.value = String(e);
   }
 }
-const poller = makeMarketPoller();
+const menuBarEnabled = isTauri() && navigator.platform.startsWith("Mac");
+const aliasKey = "tcalculator:status-aliases:v1";
+const menuAliases = ref<Record<string, string>>({});
+try {
+  const stored = JSON.parse(localStorage.getItem(aliasKey) ?? "{}");
+  if (stored && typeof stored === "object" && !Array.isArray(stored))
+    menuAliases.value = Object.fromEntries(
+      Object.entries(stored).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+} catch {
+  /* Invalid display preferences do not affect the ledger. */
+}
+const menuBarSnapshot = computed<StatusSnapshot>(() => {
+  const stale = (id: string) =>
+    !marketQuotes[id] || quoteAge(marketQuotes[id], clock.value) > 60000;
+  const held = holdingIds.value.filter((id) =>
+    new Decimal(ledger.value.positions[id]?.quantity ?? 0).gt(0),
+  );
+  const names = shortNames(
+    held.map((id) => ({ id, name: securities.value.get(id)?.name ?? id })),
+    menuAliases.value,
+  );
+  const holdings = held.map((id) => ({
+    id,
+    name: securities.value.get(id)?.name ?? id,
+    shortName: names[id],
+    change: marketQuotes[id]?.change ?? null,
+    price: marketQuotes[id]?.latest ?? null,
+    profit: performance.value[id]?.profit ?? null,
+    dailyPercent: dailyReturnPercent(performance.value[id]),
+    holdingPercent: holdingPerformance(
+      ledger.value.positions[id],
+      marketQuotes[id],
+    ).cyclePnlPercent,
+    holdingProfit: holdingPerformance(
+      ledger.value.positions[id],
+      marketQuotes[id],
+    ).cyclePnl,
+    stale: stale(id),
+  }));
+  const total = {
+    percent: totals.value.dailyPercent,
+    profit: totals.value.daily,
+    stale: holdingIds.value.some(stale),
+  };
+  return {
+    holdings,
+    total,
+    date: marketDate.value,
+    updatedAt: clock.value,
+    frames: statusBarFrames(
+      holdings.map((row) => ({ ...row, name: row.shortName })),
+      total,
+    ),
+  };
+});
+watch(menuBarSnapshot, (snapshot) => {
+  if (menuBarEnabled && ready.value)
+    void invoke("update_status_bar", { snapshot }).catch((e) => {
+      failure.value = `状态栏更新失败：${String(e)}`;
+    });
+});
+let stopMenuAlias: UnlistenFn | undefined;
+let stopMenuBarTick: UnlistenFn | undefined;
+const poller = makeMarketPoller(menuBarEnabled);
 const flowPoller = makeFundFlowPoller();
 let clockTimer: ReturnType<typeof setInterval>,
   chartTimer: ReturnType<typeof setInterval>;
@@ -851,16 +920,16 @@ function targets() {
   flowPoller.setTargets(symbols);
 }
 async function refreshCharts() {
-  if (!ready.value || document.hidden) return;
+  if (!ready.value || (document.hidden && !menuBarEnabled)) return;
   const ids = [...new Set([...visible.value, ...holdingIds.value])];
   for (const id of ids) {
     const s = securities.value.get(id);
     if (!s) continue;
     const active = () =>
       visible.value.includes(id) || holdingIds.value.includes(id);
-    void getChart(s, "daily", active).catch(() => {});
+    if (!document.hidden) void getChart(s, "daily", active).catch(() => {});
     if (holdingIds.value.includes(id))
-      void getChart(s, "daily-raw", active).catch(() => {});
+      void getChart(s, "daily-raw", active, menuBarEnabled).catch(() => {});
   }
 }
 watch(
@@ -992,6 +1061,37 @@ onMounted(async () => {
     await hydrateMarket();
     ready.value = true;
     targets();
+    if (menuBarEnabled) {
+      stopMenuBarTick = await listen("status-bar-tick", () => {
+        clock.value = Date.now();
+        void poller.refreshIfDue();
+        void refreshCharts();
+      });
+      stopMenuAlias = await listen<{ id: string; name: string }>(
+        "status-alias",
+        ({ payload }) => {
+          if (
+            !securities.value.has(payload.id) ||
+            typeof payload.name !== "string"
+          )
+            return;
+          const next = { ...menuAliases.value };
+          const name = payload.name
+            .trim()
+            .replace(/[\r\n\t]/g, "")
+            .slice(0, 12);
+          if (name) next[payload.id] = name;
+          else delete next[payload.id];
+          try {
+            localStorage.setItem(aliasKey, JSON.stringify(next));
+            menuAliases.value = next;
+          } catch {
+            failure.value = "简称保存失败，请重试";
+          }
+        },
+      );
+      await invoke("update_status_bar", { snapshot: menuBarSnapshot.value });
+    }
   } catch (e) {
     fatal.value = String(e);
   }
@@ -1001,6 +1101,8 @@ onMounted(async () => {
   document.addEventListener("keydown", keys);
 });
 onBeforeUnmount(() => {
+  stopMenuBarTick?.();
+  stopMenuAlias?.();
   poller.stop();
   flowPoller.stop();
   clearInterval(clockTimer);

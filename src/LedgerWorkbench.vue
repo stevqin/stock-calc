@@ -13,6 +13,7 @@ import Decimal from "decimal.js";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import MarketChart from "./components/MarketChart.vue";
 import StepField from "./components/StepField.vue";
+import PriceChange from "./components/PriceChange.vue";
 import HistoryEditor from "./components/HistoryEditor.vue";
 import SecuritySearch from "./components/SecuritySearch.vue";
 import type { SecurityHit } from "./securitySearch";
@@ -1287,8 +1288,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             <div class="form-grid compact trade-main-fields">
               <div class="step-field">
                 <label class="step-label" for="trade-entry-price"
-                  >成交价 · 元</label
-                >
+                  >成交价 · 元<PriceChange
+                    :price="orderPrice"
+                    :previous-close="quote?.previousClose"
+                /></label>
                 <div class="step-control">
                   <button
                     type="button"
@@ -1939,6 +1942,12 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 :decimals="priceDecimals"
                 @update:model-value="editPlanPrice('buyPrice', $event)"
               >
+                <template #label-suffix>
+                  <PriceChange
+                    :price="plan.buyPrice"
+                    :previous-close="quote?.previousClose"
+                  />
+                </template>
                 <div class="price-follow">
                   <span>{{
                     priceLocked.buyPrice
@@ -1991,6 +2000,12 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 :decimals="priceDecimals"
                 @update:model-value="editPlanPrice('sellPrice', $event)"
               >
+                <template #label-suffix>
+                  <PriceChange
+                    :price="plan.sellPrice"
+                    :previous-close="quote?.previousClose"
+                  />
+                </template>
                 <div class="price-follow">
                   <span>{{
                     priceLocked.sellPrice
@@ -2051,6 +2066,29 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   · 未配对部分计入增减仓</span
                 >
               </p>
+            </section>
+            <section class="plan-holding-pnl" aria-label="交易后持仓盈亏">
+              <div class="plan-result-label">交易后持仓盈亏</div>
+              <div class="plan-pnl-values">
+                <strong
+                  :class="tone(forwardResult.holding?.profit)"
+                  aria-label="交易后持仓盈亏金额"
+                >
+                  {{ money(forwardResult.holding?.profit)
+                  }}<small v-if="forwardResult.holding?.profit != null"
+                    >元</small
+                  >
+                </strong>
+                <span
+                  class="plan-holding-pnl-rate"
+                  :class="tone(forwardResult.holding?.profitPercent)"
+                  aria-label="交易后持仓盈亏率"
+                >
+                  <small>盈亏率</small
+                  >{{ percent(forwardResult.holding?.profitPercent) }}
+                </span>
+              </div>
+              <p>按参考现价估算 · 本轮持仓</p>
             </section>
             <div class="plan-holding-overview">
               <section class="plan-holding-cost" aria-label="交易后持仓成本">
@@ -2124,13 +2162,13 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   <dd>{{ money(forwardResult.holding?.netInvestment) }} 元</dd>
                 </div>
                 <div>
-                  <dt>交易后持仓收益</dt>
+                  <dt>交易后持仓盈亏金额</dt>
                   <dd :class="tone(forwardResult.holding?.profit)">
                     {{ money(forwardResult.holding?.profit) }} 元
                   </dd>
                 </div>
                 <div>
-                  <dt>交易后持仓收益率</dt>
+                  <dt>交易后持仓盈亏率</dt>
                   <dd>
                     {{ percent(forwardResult.holding?.profitPercent ?? null) }}
                   </dd>
@@ -2138,6 +2176,9 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               </dl>
               <p>
                 做T净收益＝配对毛收益－配对分摊费用。持仓市值按参考现价估算，现金流包含本金回收。
+              </p>
+              <p>
+                交易后持仓盈亏＝参考现价市值－交易后本轮净投入；盈亏率＝持仓盈亏÷交易后本轮净投入，净投入≤0时不计算。
               </p>
             </details>
           </div>

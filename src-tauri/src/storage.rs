@@ -26,6 +26,7 @@ pub fn connect(path: PathBuf) -> Result<Connection, String> {
         CREATE TABLE IF NOT EXISTS recovery (revision INTEGER PRIMARY KEY,payload TEXT NOT NULL,saved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS market_cache (key TEXT PRIMARY KEY,payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS drafts (id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);").map_err(|e|e.to_string())?;
+    crate::history_store::initialize(&db)?;
     Ok(db)
 }
 pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {

@@ -151,6 +151,7 @@ const history = shallowRef<Record<string, ChartData>>({});
 const loading = ref(false),
   errors = ref<string[]>([]),
   retryToken = ref(0);
+let handledRetryToken = 0;
 let generation = 0,
   disposed = false;
 watch(
@@ -158,6 +159,8 @@ watch(
     `${tradedSecurities.value.map((s) => s.id).join()}|${neededYears.value.join()}|${today.value}|${retryToken.value}`,
   async () => {
     const ticket = ++generation;
+    const force = retryToken.value !== handledRetryToken;
+    handledRetryToken = retryToken.value;
     if (!tradedSecurities.value.length) {
       loading.value = false;
       errors.value = [];
@@ -167,12 +170,34 @@ watch(
     errors.value = [];
     const failed: string[] = [];
     const requests = [...tradedSecurities.value, benchmark].flatMap((s) =>
-      neededYears.value.map((year) => ({ s, year })),
+      neededYears.value
+        .filter((year) => {
+          if (s.id === benchmark.id) return true;
+          const entries = props.account.entries
+            .filter((e) => e.securityId === s.id)
+            .sort((a, b) => a.time.localeCompare(b.time));
+          if (!entries.length) return false;
+          let quantity = new Decimal(0);
+          for (const e of entries)
+            quantity =
+              e.kind === "opening"
+                ? new Decimal(e.quantity)
+                : e.kind === "buy"
+                  ? quantity.plus(e.quantity)
+                  : quantity.minus(e.quantity);
+          const lastYear = quantity.gt(0)
+            ? Number(today.value.slice(0, 4))
+            : Number(entries.at(-1)!.date.slice(0, 4));
+          return (
+            year >= Number(entries[0].date.slice(0, 4)) && year <= lastYear
+          );
+        })
+        .map((year) => ({ s, year })),
     );
     await Promise.all(
       requests.map(async ({ s, year }) => {
         try {
-          const data = await loadAnalysisHistory(s, year);
+          const data = await loadAnalysisHistory(s, year, { force });
           if (!disposed)
             history.value = { ...history.value, [`${s.id}:${year}`]: data };
         } catch (e) {
@@ -208,6 +233,14 @@ const charts = computed(() => {
     for (const bar of chart.bars) rows.set(bar.date, bar);
     result[chart.symbol] = {
       ...chart,
+      suspensions: [
+        ...new Map(
+          [
+            ...(result[chart.symbol]?.suspensions ?? []),
+            ...(chart.suspensions ?? []),
+          ].map((e) => [e.date, e]),
+        ).values(),
+      ],
       bars: [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)),
     };
   }
@@ -484,7 +517,7 @@ const chart = computed(() => {
       <ul>
         <li v-for="error in errors" :key="error">{{ error }}</li>
       </ul>
-      <button @click="retryToken++">重新获取</button>
+      <button :disabled="loading" @click="retryToken++">重新获取</button>
     </details>
     <template v-if="validRange">
       <div class="pnl-metrics">
@@ -559,6 +592,7 @@ const chart = computed(() => {
           所选区间有 {{ summary.missingDays }} 日缺少收益基准，查看缺失日期
         </summary>
         <p>完整总盈亏暂不可用；已实现盈亏和手续费仍按账本展示。</p>
+        <button :disabled="loading" @click="retryToken++">补充历史行情</button>
         <ul>
           <li v-for="item in missingRanges" :key="item.start">
             {{ item.start

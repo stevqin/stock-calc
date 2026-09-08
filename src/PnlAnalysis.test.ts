@@ -309,4 +309,29 @@ describe("盈亏分析日历", () => {
       ].sort(),
     ).toEqual([2025, 2026]);
   });
+  it("缺失日期可以绕过旧缓存补取，后续日期更新仍按缓存策略加载", async () => {
+    wrapper = mount(PnlAnalysis, {
+      props: { account: stockAccount(), today: "2026-01-15" },
+    });
+    await flushPromises();
+    const repair = wrapper.get(".pnl-missing-ranges button");
+    vi.mocked(loadAnalysisHistory).mockClear();
+    await repair.trigger("click");
+    await flushPromises();
+    expect(vi.mocked(loadAnalysisHistory).mock.calls.length).toBeGreaterThan(0);
+    expect(
+      vi
+        .mocked(loadAnalysisHistory)
+        .mock.calls.every((args) => args[2]?.force === true),
+    ).toBe(true);
+    vi.mocked(loadAnalysisHistory).mockClear();
+    await wrapper.setProps({ today: "2026-01-16" });
+    await flushPromises();
+    expect(vi.mocked(loadAnalysisHistory).mock.calls.length).toBeGreaterThan(0);
+    expect(
+      vi
+        .mocked(loadAnalysisHistory)
+        .mock.calls.every((args) => !args[2]?.force),
+    ).toBe(true);
+  });
 });

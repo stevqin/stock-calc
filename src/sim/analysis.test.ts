@@ -540,3 +540,33 @@ describe("analysis", () => {
     expect(shiftMonth("2024-03-31", -1)).toBe("2024-02-29");
   });
 });
+
+it("uses a documented suspension valuation without inventing a traded daily bar", () => {
+  const a = account([trade("2025-04-28", "buy", "8.53")]);
+  const prices = bars({ "2025-04-28": "8.53", "2025-04-30": "8.10" });
+  const calendar = bars({
+    "2025-04-28": "10",
+    "2025-04-29": "10",
+    "2025-04-30": "10",
+  });
+  expect(
+    analyzeAccount(a, { [id]: prices }, {}, "2025-04-30", {
+      calendar,
+    }).days.find((d) => d.date === "2025-04-29")?.profit,
+  ).toBeNull();
+  prices.suspensions = [
+    {
+      date: "2025-04-29",
+      referenceDate: "2025-04-28",
+      source: "https://disc.static.szse.cn/disc/notice.pdf",
+    },
+  ];
+  const result = analyzeAccount(a, { [id]: prices }, {}, "2025-04-30", {
+    calendar,
+  });
+  expect(result.days.find((d) => d.date === "2025-04-29")?.profit).toBe("0.00");
+  expect(result.days.find((d) => d.date === "2025-04-30")?.profit).toBe(
+    "-43.00",
+  );
+  expect(prices.bars).toHaveLength(2);
+});

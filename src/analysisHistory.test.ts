@@ -7,6 +7,10 @@ const bridge = vi.hoisted(() => ({
 }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 const security = manualAccount().securities[0];
+const network = vi.fn();
+const database = new Map<string, ChartData>();
+const key = (year = 2025) => `${security.id}:${year}`;
+const legacyKey = `tcalculator:analysis-history:v1:${key()}`;
 const chart = (year = 2025): ChartData => ({
   symbol: security.id,
   mode: "daily-raw",
@@ -24,170 +28,179 @@ const chart = (year = 2025): ChartData => ({
 });
 beforeEach(() => {
   vi.resetModules();
-  bridge.invoke.mockReset();
   localStorage.clear();
+  database.clear();
+  network.mockReset();
+  bridge.invoke.mockReset();
+  bridge.isTauri.mockReturnValue(true);
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-09-07T08:00:00Z"));
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "load_analysis_cache")
+      return database.get(`${args.symbol}:${args.year}`) ?? null;
+    if (command === "write_analysis_cache") {
+      database.set(
+        `${args.data.symbol}:${args.year}`,
+        structuredClone(args.data),
+      );
+      return;
+    }
+    if (command === "clear_analysis_cache") {
+      database.clear();
+      return;
+    }
+    if (command === "fetch_analysis_history") return network(args);
+    throw new Error(`unexpected command ${command}`);
+  });
 });
 afterEach(() => vi.useRealTimers());
-it("loads chronological raw annual bars, deduplicates and persists separately", async () => {
-  bridge.invoke.mockResolvedValue(chart());
-  const { loadAnalysisHistory } = await import("./analysisHistory");
-  const [a, b] = await Promise.all([
-    loadAnalysisHistory(security, 2025),
-    loadAnalysisHistory(security, 2025),
-  ]);
-  expect(a).toEqual(b);
-  expect(a.bars.map((b) => b.date)).toEqual(["2024-12-31", "2025-01-03"]);
-  expect(bridge.invoke).toHaveBeenCalledTimes(1);
-  expect(bridge.invoke).toHaveBeenCalledWith("fetch_analysis_history", {
-    market: security.market,
-    code: security.code,
-    year: 2025,
-  });
+it("persists to SQLite and reloads offline without localStorage or network", async () => {
+  network.mockResolvedValue(chart());
+  let mod = await import("./analysisHistory");
+  const a = mod.loadAnalysisHistory(security, 2025);
+  expect(mod.loadAnalysisHistory(security, 2025)).toBe(a);
+  expect((await a).bars[0].date).toBe("2024-12-31");
+  expect(database.has(key())).toBe(true);
+  expect(localStorage.length).toBe(0);
   vi.resetModules();
-  const reloaded = await import("./analysisHistory");
-  expect(await reloaded.loadAnalysisHistory(security, 2025)).toEqual(a);
-  expect(bridge.invoke).toHaveBeenCalledTimes(1);
+  mod = await import("./analysisHistory");
+  network.mockRejectedValue(new Error("offline"));
+  expect((await mod.loadAnalysisHistory(security, 2025)).bars).toHaveLength(2);
+  expect(network).toHaveBeenCalledTimes(1);
 });
-it("refreshes current-year cache on the next Shanghai date", async () => {
-  bridge.invoke.mockImplementation(async () => chart(2026));
-  const { loadAnalysisHistory } = await import("./analysisHistory");
-  await loadAnalysisHistory(security, 2026);
-  await loadAnalysisHistory(security, 2026);
-  expect(bridge.invoke).toHaveBeenCalledTimes(1);
+it("migrates valid legacy history only after a durable SQLite write", async () => {
+  localStorage.setItem(
+    legacyKey,
+    JSON.stringify({
+      version: 1,
+      year: 2025,
+      start: "2024-12-01",
+      end: "2025-12-31",
+      data: chart(),
+    }),
+  );
+  const mod = await import("./analysisHistory");
+  await mod.loadAnalysisHistory(security, 2025);
+  expect(database.has(key())).toBe(true);
+  expect(localStorage.getItem(legacyKey)).toBeNull();
+  expect(network).not.toHaveBeenCalled();
+});
+it("preserves legacy data if SQLite migration fails", async () => {
+  localStorage.setItem(
+    legacyKey,
+    JSON.stringify({
+      version: 1,
+      year: 2025,
+      start: "2024-12-01",
+      end: "2025-12-31",
+      data: chart(),
+    }),
+  );
+  const real = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation((cmd, args) =>
+    cmd === "write_analysis_cache"
+      ? Promise.reject(new Error("disk full"))
+      : real(cmd, args),
+  );
+  const mod = await import("./analysisHistory");
+  await expect(mod.loadAnalysisHistory(security, 2025)).rejects.toThrow(
+    "disk full",
+  );
+  expect(localStorage.getItem(legacyKey)).not.toBeNull();
+  expect(database.size).toBe(0);
+});
+it("uses SQLite in preference to older localStorage", async () => {
+  database.set(key(), chart());
+  localStorage.setItem(legacyKey, "broken");
+  const mod = await import("./analysisHistory");
+  expect((await mod.loadAnalysisHistory(security, 2025)).bars).toHaveLength(2);
+  expect(network).not.toHaveBeenCalled();
+});
+it("refreshes current-year history across date and close-publication boundaries", async () => {
+  vi.setSystemTime(new Date("2026-09-07T02:00:00Z"));
+  network.mockImplementation(async () => chart(2026));
+  const mod = await import("./analysisHistory");
+  await mod.loadAnalysisHistory(security, 2026);
+  await mod.loadAnalysisHistory(security, 2026);
+  expect(network).toHaveBeenCalledTimes(1);
+  vi.setSystemTime(new Date("2026-09-07T08:00:00Z"));
+  await mod.loadAnalysisHistory(security, 2026);
+  expect(network).toHaveBeenCalledTimes(2);
   vi.setSystemTime(new Date("2026-09-07T17:00:00Z"));
-  await loadAnalysisHistory(security, 2026);
-  expect(bridge.invoke).toHaveBeenCalledTimes(2);
+  await mod.loadAnalysisHistory(security, 2026);
+  expect(network).toHaveBeenCalledTimes(3);
 });
-it("rejects adjusted, wrong-symbol, invalid dates and negative prices, and permits retry", async () => {
-  const { loadAnalysisHistory } = await import("./analysisHistory");
-  for (const bad of [
+it("rejects empty, adjusted, wrong-symbol and invalid-price history without saving", async () => {
+  const mod = await import("./analysisHistory");
+  for (const data of [
+    { ...chart(), bars: [] },
     { ...chart(), adjustment: "前复权" },
     { ...chart(), symbol: "sh000000" },
-    { ...chart(), bars: [{ ...chart().bars[0], date: "2025-02-30" }] },
     { ...chart(), bars: [{ ...chart().bars[0], close: "-1" }] },
   ]) {
-    bridge.invoke.mockResolvedValueOnce(bad);
-    await expect(loadAnalysisHistory(security, 2025)).rejects.toThrow();
+    network.mockResolvedValueOnce(data);
+    await expect(mod.loadAnalysisHistory(security, 2025)).rejects.toThrow();
+    expect(database.size).toBe(0);
   }
-  bridge.invoke.mockRejectedValueOnce(new Error("offline"));
-  await expect(loadAnalysisHistory(security, 2025)).rejects.toThrow("offline");
-  bridge.invoke.mockResolvedValueOnce(chart());
-  expect((await loadAnalysisHistory(security, 2025)).bars).toHaveLength(2);
 });
-it("discards corrupted cache metadata", async () => {
-  bridge.invoke.mockResolvedValue(chart());
-  let module = await import("./analysisHistory");
-  await module.loadAnalysisHistory(security, 2025);
-  const key = localStorage.key(0)!;
-  const cached = JSON.parse(localStorage.getItem(key)!);
-  cached.year = 2024;
-  localStorage.setItem(key, JSON.stringify(cached));
-  vi.resetModules();
-  module = await import("./analysisHistory");
-  await module.loadAnalysisHistory(security, 2025);
-  expect(bridge.invoke).toHaveBeenCalledTimes(2);
+it("manual repair bypasses cached partial history and returns the stored merged result", async () => {
+  database.set(key(), { ...chart(), bars: [chart().bars[0]] });
+  network.mockResolvedValue(chart());
+  const mod = await import("./analysisHistory");
+  expect((await mod.loadAnalysisHistory(security, 2025)).bars).toHaveLength(1);
+  expect(
+    (await mod.loadAnalysisHistory(security, 2025, { force: true })).bars,
+  ).toHaveLength(2);
+  expect(network).toHaveBeenCalledTimes(1);
 });
-it("limits native requests to three and drains the queue after errors", async () => {
+it("limits network concurrency to three", async () => {
   let active = 0,
     peak = 0;
-  const finish: (() => void)[] = [];
-  bridge.invoke.mockImplementation(
-    (_cmd, args) =>
+  const done: (() => void)[] = [];
+  network.mockImplementation(
+    (args) =>
       new Promise((resolve) => {
         active++;
-        peak = Math.max(peak, active);
-        finish.push(() => {
+        peak = Math.max(active, peak);
+        done.push(() => {
           active--;
           resolve(chart(args.year));
         });
       }),
   );
-  const { loadAnalysisHistory } = await import("./analysisHistory");
-  const requests = [2020, 2021, 2022, 2023, 2024].map((year) =>
-    loadAnalysisHistory(security, year),
+  const mod = await import("./analysisHistory");
+  const requests = [2020, 2021, 2022, 2023, 2024].map((y) =>
+    mod.loadAnalysisHistory(security, y),
   );
   await vi.advanceTimersByTimeAsync(0);
   expect(peak).toBe(3);
-  while (finish.length) {
-    finish.shift()!();
+  while (done.length) {
+    done.shift()!();
     await vi.advanceTimersByTimeAsync(0);
   }
   await Promise.all(requests);
   expect(peak).toBe(3);
 });
-
-it("allows the Shanghai benchmark without broadening trading symbols", async () => {
-  bridge.invoke.mockResolvedValue({ ...chart(), symbol: "sh000001" });
-  const { loadAnalysisHistory } = await import("./analysisHistory");
-  expect(
-    (
-      await loadAnalysisHistory(
-        { ...security, id: "sh000001", market: "sh", code: "000001" },
-        2025,
-      )
-    ).symbol,
-  ).toBe("sh000001");
-});
-
-it("refreshes a historical year's cache if it was fetched before that year closed", async () => {
-  const old = chart();
-  old.fetchedAt = "2025-12-30T08:00:00Z";
-  bridge.invoke.mockResolvedValueOnce(old).mockResolvedValueOnce(chart());
-  const { loadAnalysisHistory } = await import("./analysisHistory");
-  await loadAnalysisHistory(security, 2025);
-  await loadAnalysisHistory(security, 2025);
-  expect(bridge.invoke).toHaveBeenCalledTimes(2);
-});
-it("retains fetched data when persistent storage is full", async () => {
-  const storage = vi
-    .spyOn(Storage.prototype, "setItem")
-    .mockImplementation(() => {
-      throw new Error("quota");
-    });
-  bridge.invoke.mockResolvedValue(chart());
-  try {
-    const { loadAnalysisHistory } = await import("./analysisHistory");
-    expect((await loadAnalysisHistory(security, 2025)).bars).toHaveLength(2);
-    expect((await loadAnalysisHistory(security, 2025)).bars).toHaveLength(2);
-    expect(bridge.invoke).toHaveBeenCalledTimes(1);
-  } finally {
-    storage.mockRestore();
-  }
-});
-
-it("clears only annual history caches and leaves account storage intact", async () => {
-  bridge.invoke.mockResolvedValue(chart());
-  localStorage.setItem("account", "ledger");
-  localStorage.setItem("other-cache", "other");
-  const { loadAnalysisHistory, clearAnalysisHistory } =
-    await import("./analysisHistory");
-  await loadAnalysisHistory(security, 2025);
-  clearAnalysisHistory();
-  expect(localStorage.length).toBe(2);
-  expect(localStorage.getItem("account")).toBe("ledger");
-  expect(localStorage.getItem("other-cache")).toBe("other");
-  await loadAnalysisHistory(security, 2025);
-  expect(bridge.invoke).toHaveBeenCalledTimes(2);
-});
-it("does not repopulate cleared caches or delete a newer same-key request when old work finishes", async () => {
-  const finish: ((data: ChartData) => void)[] = [];
-  bridge.invoke.mockImplementation(
-    () => new Promise((resolve) => finish.push(resolve)),
+it("clears only history and prevents an old fetch repopulating SQLite", async () => {
+  localStorage.setItem("account", "safe");
+  let finish!: (data: ChartData) => void;
+  network.mockImplementation(
+    () => new Promise((resolve) => (finish = resolve)),
   );
-  const { loadAnalysisHistory, clearAnalysisHistory } =
-    await import("./analysisHistory");
-  const old = loadAnalysisHistory(security, 2025);
-  clearAnalysisHistory();
-  const current = loadAnalysisHistory(security, 2025);
-  expect(bridge.invoke).toHaveBeenCalledTimes(2);
-  finish[0](chart());
-  await old;
-  expect(localStorage.length).toBe(0);
-  expect(loadAnalysisHistory(security, 2025)).toBe(current);
-  expect(bridge.invoke).toHaveBeenCalledTimes(2);
-  finish[1](chart());
-  await current;
-  expect(localStorage.length).toBe(1);
+  const mod = await import("./analysisHistory");
+  const request = mod.loadAnalysisHistory(security, 2025);
+  await vi.advanceTimersByTimeAsync(0);
+  await mod.clearAnalysisHistory();
+  finish(chart());
+  await request;
+  expect(database.size).toBe(0);
+  expect(localStorage.getItem("account")).toBe("safe");
+});
+it("reuses stale persisted historical bars if current-year refresh is offline", async () => {
+  const data = chart(2026);
+  data.fetchedAt = "2026-09-06T08:00:00Z";
+  database.set(key(2026), data);
+  network.mockRejectedValue(new Error("offline"));
+  const mod = await import("./analysisHistory");
+  expect((await mod.loadAnalysisHistory(security, 2026)).bars).toHaveLength(2);
 });

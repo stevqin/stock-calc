@@ -15,7 +15,7 @@ const pending = new Map<string, Promise<ChartData>>();
 let epoch = 0;
 const cachePrefix = "tcalculator:analysis-history:v1:";
 /** Discard only analysis prices; completed pre-clear requests cannot restore them. */
-export function clearAnalysisHistory(): void {
+export async function clearAnalysisHistory(): Promise<void> {
   epoch++;
   cache.clear();
   pending.clear();
@@ -26,6 +26,7 @@ export function clearAnalysisHistory(): void {
     if (key?.startsWith(cachePrefix)) keys.push(key);
   }
   for (const key of keys) localStorage.removeItem(key);
+  if (isTauri()) await invoke("clear_analysis_cache");
 }
 let active = 0;
 const queue: (() => void)[] = [];
@@ -60,6 +61,7 @@ function validate(data: ChartData, symbol: string, year: number): ChartData {
     data.adjustment !== "不复权" ||
     !Number.isFinite(Date.parse(data.fetchedAt)) ||
     !Array.isArray(data.bars) ||
+    data.bars.length === 0 ||
     data.bars.length > 400 ||
     !Array.isArray(data.sessions) ||
     data.sessions.length
@@ -113,24 +115,32 @@ function read(
     )
       return;
     item.data = validate(item.data, symbol, year);
-    const today = shanghaiDate();
-    // An old year fetched while it was still open also needs one final refresh.
-    if (
-      year === Number(today.slice(0, 4))
-        ? shanghaiDate(new Date(item.data.fetchedAt)) !== today
-        : shanghaiDate(new Date(item.data.fetchedAt)) <= end
-    )
-      return;
-    cache.set(key, item);
     return item;
   } catch {
     return;
   }
 }
+function fresh(data: ChartData, year: number): boolean {
+  const today = shanghaiDate();
+  const end = bounds(year).end;
+  if (
+    year === Number(today.slice(0, 4))
+      ? shanghaiDate(new Date(data.fetchedAt)) !== today
+      : shanghaiDate(new Date(data.fetchedAt)) <= end
+  )
+    return false;
+  const closing = Date.parse(`${today}T16:00:00+08:00`);
+  return !(
+    year === Number(today.slice(0, 4)) &&
+    Date.now() >= closing &&
+    Date.parse(data.fetchedAt) < closing
+  );
+}
 /** Annual raw prices, including December of the prior year for the opening reference. */
 export function loadAnalysisHistory(
   security: Security,
   year: number,
+  options: { force?: boolean } = {},
 ): Promise<ChartData> {
   const currentYear = Number(shanghaiDate().slice(0, 4));
   if (
@@ -145,27 +155,64 @@ export function loadAnalysisHistory(
   const key = `${cachePrefix}${security.id}:${year}`;
   const existing = pending.get(key);
   if (existing) return existing;
-  const stored = read(key, security.id, year);
-  if (stored) return Promise.resolve(stored.data);
+  const stored = cache.get(key);
+  if (!options.force && stored && fresh(stored.data, year))
+    return Promise.resolve(stored.data);
   const requestEpoch = epoch;
   const request = limited(async () => {
-    if (!isTauri()) throw new Error("历史行情需在桌面版联网获取");
-    const data = validate(
-      await invoke<ChartData>("fetch_analysis_history", {
-        market: security.market,
-        code: security.code,
+    let previous: ChartData | undefined;
+    if (isTauri()) {
+      const saved = await invoke<ChartData | null>("load_analysis_cache", {
+        symbol: security.id,
         year,
-      }),
-      security.id,
-      year,
-    );
-    if (requestEpoch !== epoch) return data;
-    const item: AnnualCache = { version: 1, year, ...bounds(year), data };
-    cache.set(key, item);
+      });
+      if (saved) previous = validate(saved, security.id, year);
+      else {
+        const legacy = read(key, security.id, year);
+        if (legacy) {
+          if (requestEpoch !== epoch) return legacy.data;
+          await invoke("write_analysis_cache", { year, data: legacy.data });
+          localStorage.removeItem(key);
+          previous = legacy.data;
+        }
+      }
+    } else previous = read(key, security.id, year)?.data;
+    if (!options.force && previous && fresh(previous, year)) {
+      if (requestEpoch === epoch)
+        cache.set(key, { version: 1, year, ...bounds(year), data: previous });
+      return previous;
+    }
+    if (!isTauri()) {
+      if (previous) return previous;
+      throw new Error("历史行情需在桌面版联网获取");
+    }
+    let data: ChartData;
     try {
-      localStorage.setItem(key, JSON.stringify(item));
-    } catch {
-      /* Disposable cache must not prevent using fetched prices. */
+      data = validate(
+        await invoke<ChartData>("fetch_analysis_history", {
+          market: security.market,
+          code: security.code,
+          year,
+        }),
+        security.id,
+        year,
+      );
+    } catch (error) {
+      // Preserve historical analysis offline. An explicit repair still reports failures.
+      if (previous && !options.force) return previous;
+      throw error;
+    }
+    if (requestEpoch !== epoch) return data;
+    await invoke("write_analysis_cache", { year, data });
+    // SQLite merges newer daily prices and retains verified suspension metadata.
+    const merged = await invoke<ChartData | null>("load_analysis_cache", {
+      symbol: security.id,
+      year,
+    });
+    if (merged) data = validate(merged, security.id, year);
+    if (requestEpoch === epoch) {
+      cache.set(key, { version: 1, year, ...bounds(year), data });
+      localStorage.removeItem(key);
     }
     return data;
   }).finally(() => {

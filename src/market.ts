@@ -101,6 +101,7 @@ export class BatchPoller {
   private disposed = false;
   private generation = 0;
   private failures = 0;
+  private nextRefreshAt = 0;
   private timer?: ReturnType<typeof setTimeout>;
   constructor(
     private fetcher: (s: Security[]) => Promise<BatchResult>,
@@ -123,6 +124,9 @@ export class BatchPoller {
     this.disposed = true;
     this.generation++;
     clearTimeout(this.timer);
+  }
+  async refreshIfDue() {
+    if (Date.now() >= this.nextRefreshAt) await this.refresh();
   }
   async refresh() {
     if (this.disposed || this.busy) return;
@@ -167,26 +171,28 @@ export class BatchPoller {
       this.state(`行情未连接 · ${e instanceof Error ? e.message : e}`);
     } finally {
       this.busy = false;
-      if (!this.disposed)
-        this.timer = setTimeout(
-          () => void this.refresh(),
+      if (!this.disposed) {
+        const delay =
           g !== this.generation
             ? 0
             : Math.min(
                 Math.max(60000, this.intervalMs * 4),
                 this.intervalMs * 2 ** Math.min(this.failures, 5),
-              ),
-        );
+              );
+        this.nextRefreshAt = Date.now() + delay;
+        this.timer = setTimeout(() => void this.refresh(), delay);
+      }
     }
   }
 }
 let savedQuotesAt = 0;
-export function makeMarketPoller() {
+export function makeMarketPoller(background = false) {
   return new BatchPoller(
     async (symbols) => {
       if (!isTauri()) throw new Error("浏览器仅供离线预览，请打开Mac版");
       return invoke<BatchResult>("fetch_quotes", {
         symbols: symbols.map(({ market, code }) => ({ market, code })),
+        background,
       });
     },
     (result) => {
@@ -202,6 +208,7 @@ export function makeMarketPoller() {
       }
     },
     (text) => (marketStatus.text = text),
+    () => background || !document.hidden,
   );
 }
 export function makeFundFlowPoller() {
@@ -268,6 +275,7 @@ export async function getChart(
   s: Security,
   mode: ChartMode,
   active: () => boolean = () => true,
+  background = false,
 ): Promise<ChartData> {
   const key = chartKey(s.id, mode),
     cached = marketCharts[key];
@@ -286,13 +294,14 @@ export async function getChart(
   }
   const job = queue
     .run(async () => {
-      if (document.hidden || !active())
+      if ((!background && document.hidden) || !active())
         throw new Error("图表不可见，等待重新显示");
       if (!isTauri()) throw new Error("桌面版提供实时走势");
       const data = await invoke<ChartData>("fetch_chart", {
         market: s.market,
         code: s.code,
         mode,
+        background,
       });
       if (!validChart(data, key)) throw new Error("图表格式无效或证券不匹配");
       if (mode === "daily-raw" && data.adjustment !== "不复权")

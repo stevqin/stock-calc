@@ -355,3 +355,14 @@ it("突出扣费做T收益，并分别显示交易后成本和按现价估算的
     wrapper.get(".plan-calculation-details").attributes("open"),
   ).toBeUndefined();
 });
+
+it("买卖价格旁分别显示相对行情昨收的涨跌幅", async () => {
+  marketQuotes.sh510300!.previousClose = "10";
+  await start();
+  await input("买入价").setValue("9");
+  await input("卖出价").setValue("11");
+  expect(wrapper.findAll(".price-change").map((node) => node.text())).toEqual([
+    "较昨收 -10.00%",
+    "较昨收 +10.00%",
+  ]);
+});

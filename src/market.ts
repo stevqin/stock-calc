@@ -283,7 +283,8 @@ export async function getChart(
   if (
     cached &&
     (daily
-      ? shanghaiDate(new Date(cached.fetchedAt)) === shanghaiDate()
+      ? (cached.historyWindow ?? 0) >= 400 &&
+        shanghaiDate(new Date(cached.fetchedAt)) === shanghaiDate()
       : Date.now() - Date.parse(cached.fetchedAt) < 30000)
   )
     return cached;

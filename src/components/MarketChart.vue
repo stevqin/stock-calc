@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import {
+  movingAverage,
+  chipEstimate,
+  macd,
+  visibleExtrema,
+} from "../sim/indicators";
 import { ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { isTauri } from "@tauri-apps/api/core";
 import * as echarts from "echarts/core";
@@ -13,6 +19,7 @@ import {
   TooltipComponent,
   DataZoomComponent,
   LegendComponent,
+  MarkPointComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import {
@@ -34,22 +41,27 @@ echarts.use([
   TooltipComponent,
   DataZoomComponent,
   LegendComponent,
+  MarkPointComponent,
   CanvasRenderer,
 ]);
 const props = defineProps<{
   security: Security;
   mode: ChartMode;
   trades?: Entry[];
+  quoteStyle?: boolean;
+  hideSnapshot?: boolean;
 }>();
+const emit = defineEmits<{ chipsVisibility: [visible: boolean] }>();
 const el = ref<HTMLElement>();
 const error = ref("");
 const loading = ref(false);
-const meta = ref("");
-const markedCount = ref(0);
 const snapshot = ref<
   { label: string; value: string; tone?: "gain" | "loss" | "flat" }[]
 >([]);
 let latestData: ChartData | undefined;
+let zoomWindow = { start: 0, end: 100 };
+let zoomTouched = false;
+let selectedLegends: Record<string, boolean> = {};
 let chart: echarts.ECharts | undefined,
   observer: ResizeObserver | undefined,
   timer: ReturnType<typeof setTimeout> | undefined,
@@ -178,8 +190,15 @@ function updateSnapshot(d: ChartData) {
 function draw(d: ChartData) {
   if (!chart) return;
   latestData = d;
+  if (!zoomTouched)
+    zoomWindow = {
+      start:
+        d.bars.length > 60
+          ? ((d.bars.length - 60) / (d.bars.length - 1)) * 100
+          : 0,
+      end: 100,
+    };
   const markers = tradeMarkers(d, props.trades ?? []);
-  markedCount.value = markers.reduce((sum, m) => sum + m.trades.length, 0);
   const daily = d.mode === "daily" || d.mode === "daily-raw";
   const markerSides = props.trades
     ? daily
@@ -250,12 +269,29 @@ function draw(d: ChartData) {
   const labels = daily ? d.bars.map((b) => b.date) : line.labels;
   const priceDigits = props.security.asset === "etf" ? 3 : 2;
   updateSnapshot(d);
-  const priceColor = marketColor(
-    Number(line.price.filter((v) => v !== null).at(-1)) -
-      Number(line.baseline.filter((v) => v !== null).at(-1)),
-  );
+  const priceColor = props.quoteStyle
+    ? "#387bd1"
+    : marketColor(
+        Number(line.price.filter((v) => v !== null).at(-1)) -
+          Number(line.baseline.filter((v) => v !== null).at(-1)),
+      );
   if (!labels.length) throw new Error("当前周期暂无数据");
-  const axes = [0, 1].map((gridIndex) => ({
+  const studies = daily && props.quoteStyle;
+  const chips = studies
+    ? chipEstimate(
+        d.bars,
+        marketQuotes[props.security.id]?.rawFields?.[72] ?? "",
+      )
+    : null;
+  const oscillators = studies ? macd(d.bars) : [];
+  const showChips =
+    studies && !!chips && selectedLegends["筹码峰·估算"] !== false;
+  emit("chipsVisibility", showChips);
+  const chartRight = showChips ? 150 : daily ? 20 : 64;
+  const extrema = daily
+    ? visibleExtrema(d.bars, zoomWindow.start, zoomWindow.end)
+    : null;
+  const axes = (studies ? [0, 1, 2] : [0, 1]).map((gridIndex) => ({
     type: "category",
     gridIndex,
     data: labels,
@@ -263,7 +299,7 @@ function draw(d: ChartData) {
     axisLine: { lineStyle: { color: "#dce4ef" } },
     axisLabel: {
       color: "#8391a5",
-      show: gridIndex === 1,
+      show: gridIndex === (studies ? 2 : 1),
       hideOverlap: daily,
       showMinLabel: true,
       showMaxLabel: true,
@@ -303,11 +339,35 @@ function draw(d: ChartData) {
     {
       animation: false,
       color: [priceColor, "#c6923c", "#aeb9c9"],
-      legend: {
-        top: 4,
-        left: 12,
-        textStyle: { fontSize: 11, color: "#7e8b9e" },
-      },
+      legend: [
+        {
+          selected: selectedLegends,
+          type: "scroll",
+          itemWidth: 12,
+          itemHeight: 8,
+          itemGap: 8,
+          right: 8,
+          top: 4,
+          left: 12,
+          ...(studies
+            ? { data: ["日K", "MA5", "MA10", "MA20", "MA60", "筹码峰·估算"] }
+            : {}),
+          textStyle: { fontSize: 11, color: "#7e8b9e" },
+        },
+        ...(studies
+          ? [
+              {
+                selected: selectedLegends,
+                data: ["MACD", "DIF", "DEA"],
+                left: 64,
+                bottom: 122,
+                itemWidth: 10,
+                itemHeight: 6,
+                textStyle: { fontSize: 10, color: "#7e8b9e" },
+              },
+            ]
+          : []),
+      ],
       tooltip: {
         trigger: "axis",
         renderMode: "richText",
@@ -326,13 +386,21 @@ function draw(d: ChartData) {
         formatter: (params: unknown) => tooltipText(params, d, line, markers),
       },
       grid: [
-        { left: 64, right: daily ? 20 : 64, top: 32, bottom: daily ? 88 : 64 },
         {
           left: 64,
-          right: daily ? 20 : 64,
-          bottom: daily ? 38 : 22,
+          right: chartRight,
+          top: 32,
+          bottom: studies ? 188 : daily ? 88 : 64,
+        },
+        {
+          left: 64,
+          right: chartRight,
+          bottom: studies ? 144 : daily ? 38 : 22,
           height: 30,
         },
+        ...(studies
+          ? [{ left: 64, right: chartRight, bottom: 52, height: 64 }]
+          : []),
       ],
       xAxis: axes,
       yAxis: [
@@ -397,27 +465,181 @@ function draw(d: ChartData) {
           },
           splitLine: { show: false },
         },
+        ...(studies
+          ? [
+              {
+                gridIndex: 2,
+                scale: true,
+                splitNumber: 2,
+                name: "",
+                nameTextStyle: { fontSize: 10, color: "#8391a5" },
+                axisLabel: { color: "#8391a5", fontSize: 10 },
+                splitLine: { lineStyle: { color: "#edf1f6" } },
+              },
+            ]
+          : []),
       ],
       dataZoom: daily
         ? [
-            { type: "inside", xAxisIndex: [0, 1], start: 65, end: 100 },
+            {
+              type: "inside",
+              xAxisIndex: studies ? [0, 1, 2] : [0, 1],
+              start: zoomWindow.start,
+              end: zoomWindow.end,
+            },
             {
               type: "slider",
-              xAxisIndex: [0, 1],
-              bottom: 0,
-              height: 14,
-              start: 65,
-              end: 100,
-              borderColor: "#edf1f6",
+              xAxisIndex: studies ? [0, 1, 2] : [0, 1],
+              bottom: 5,
+              left: 64,
+              right: chartRight,
+              height: 22,
+              showDataShadow: false,
+              backgroundColor: "#e8eef6",
+              fillerColor: "#b9cde9",
+              borderColor: "#a3b6cf",
+              handleSize: "110%",
+              handleStyle: {
+                color: "#557ba9",
+                borderColor: "#365f91",
+                borderWidth: 1,
+              },
+              moveHandleSize: 6,
+              moveHandleStyle: { color: "#8aa8ce" },
+              textStyle: { color: "#425d7d", fontSize: 10 },
+              start: zoomWindow.start,
+              end: zoomWindow.end,
             },
           ]
         : [],
       series: [
+        ...(studies
+          ? [
+              {
+                name: "MACD",
+                type: "bar",
+                xAxisIndex: 2,
+                yAxisIndex: 2,
+                data: oscillators.map((v) => ({
+                  value: v.histogram,
+                  itemStyle: { color: marketColor(v.histogram) },
+                })),
+              },
+              ...(["dif", "dea"] as const).map((key, i) => ({
+                name: key.toUpperCase(),
+                type: "line",
+                xAxisIndex: 2,
+                yAxisIndex: 2,
+                symbol: "none",
+                data: oscillators.map((v) => v[key]),
+                lineStyle: { width: 1, color: i ? "#d49b32" : "#4383c9" },
+                itemStyle: { color: i ? "#d49b32" : "#4383c9" },
+              })),
+            ]
+          : []),
+        ...(chips
+          ? [
+              {
+                name: "筹码峰·估算",
+                type: "custom",
+                clip: false,
+                silent: true,
+                encode: { x: -1, y: 0 },
+                tooltip: { show: false },
+                data: chips.prices.map((price, i) => [
+                  price,
+                  chips.portions[i],
+                ]),
+                renderItem: (
+                  params: {
+                    coordSys: {
+                      x: number;
+                      y: number;
+                      width: number;
+                      height: number;
+                    };
+                  },
+                  api: {
+                    value: (index: number) => number;
+                    coord: (point: number[]) => number[];
+                  },
+                ) => {
+                  const area = params.coordSys;
+                  const price = api.value(0);
+                  const y = api.coord([0, price])[1];
+                  const step = chips.prices[1] - chips.prices[0];
+                  const height = Math.max(
+                    1,
+                    Math.abs(api.coord([0, price + step])[1] - y) * 0.8,
+                  );
+                  if (y < area.y || y > area.y + area.height) return;
+                  return {
+                    type: "rect",
+                    shape: {
+                      x: area.x + area.width + 20,
+                      y: y - height / 2,
+                      width: (api.value(1) / Math.max(...chips.portions)) * 110,
+                      height,
+                    },
+                    style: {
+                      fill:
+                        price <= Number(d.bars.at(-1)?.close)
+                          ? "#cf5662"
+                          : "#479b78",
+                    },
+                  };
+                },
+              },
+            ]
+          : []),
         ...(daily
           ? [
               {
                 name: "日K",
                 type: "candlestick",
+                markPoint: extrema
+                  ? {
+                      symbol: "circle",
+                      symbolSize: 4,
+                      itemStyle: { color: "#65758a" },
+                      data: [
+                        {
+                          coord: [d.bars[extrema.highIndex].date, extrema.high],
+                          value: extrema.high,
+                          label: {
+                            show: true,
+                            formatter: `最高 ${n(extrema.high, priceDigits)}`,
+                            position:
+                              extrema.highIndex >
+                              ((d.bars.length - 1) *
+                                (zoomWindow.start + zoomWindow.end)) /
+                                200
+                                ? "left"
+                                : "right",
+                            color: "#596a80",
+                            fontSize: 10,
+                          },
+                        },
+                        {
+                          coord: [d.bars[extrema.lowIndex].date, extrema.low],
+                          value: extrema.low,
+                          label: {
+                            show: true,
+                            formatter: `最低 ${n(extrema.low, priceDigits)}`,
+                            position:
+                              extrema.lowIndex >
+                              ((d.bars.length - 1) *
+                                (zoomWindow.start + zoomWindow.end)) /
+                                200
+                                ? "left"
+                                : "right",
+                            color: "#596a80",
+                            fontSize: 10,
+                          },
+                        },
+                      ],
+                    }
+                  : undefined,
                 data: d.bars.map((b) => ({
                   value: [+b.open, +b.close, +b.low, +b.high],
                   itemStyle: {
@@ -434,6 +656,20 @@ function draw(d: ChartData) {
                   borderColor0: MARKET_COLORS.loss,
                 },
               },
+              ...([5, 10, 20, 60] as const).map((period, i) => ({
+                name: `MA${period}`,
+                type: "line",
+                data: movingAverage(d.bars, period),
+                symbol: "none",
+                connectNulls: false,
+                lineStyle: {
+                  width: 1,
+                  color: ["#d69a32", "#d164a1", "#5c9bdb", "#7e70c4"][i],
+                },
+                itemStyle: {
+                  color: ["#d69a32", "#d164a1", "#5c9bdb", "#7e70c4"][i],
+                },
+              })),
               {
                 name: "成交量（手）",
                 type: "bar",
@@ -465,7 +701,11 @@ function draw(d: ChartData) {
                 type: "line",
                 symbol: "none",
                 data: line.average,
-                lineStyle: { width: 1 },
+                lineStyle: {
+                  width: 1,
+                  color: props.quoteStyle ? "#d49b32" : undefined,
+                },
+                itemStyle: props.quoteStyle ? { color: "#d49b32" } : undefined,
               },
               {
                 name: "昨收",
@@ -479,8 +719,16 @@ function draw(d: ChartData) {
                 type: "bar",
                 xAxisIndex: 1,
                 yAxisIndex: 2,
-                data: line.volume,
-                itemStyle: { color: "#a3b9dd" },
+                data: line.volume.map((value, index) =>
+                  value === null
+                    ? null
+                    : {
+                        value,
+                        itemStyle: {
+                          color: marketColor(line.volumeChange[index] ?? 0),
+                        },
+                      },
+                ),
               },
             ]),
         ...markerSeries,
@@ -488,7 +736,6 @@ function draw(d: ChartData) {
     },
     true,
   );
-  meta.value = `${d.adjustment} · ${daily ? d.bars.at(-1)?.date : d.sessions.at(-1)?.date} · 获取 ${new Date(d.fetchedAt).toLocaleTimeString("zh-CN", { hour12: false })}`;
 }
 async function refresh() {
   if (disposed || document.hidden || busy) return;
@@ -519,10 +766,11 @@ async function refresh() {
 }
 function reset() {
   generation++;
+  zoomTouched = false;
+  zoomWindow = { start: 0, end: 100 };
+  selectedLegends = {};
   latestData = undefined;
-  markedCount.value = 0;
   chart?.clear();
-  meta.value = "";
   snapshot.value = [];
   error.value = "";
   void refresh();
@@ -547,6 +795,26 @@ watch(
 );
 onMounted(() => {
   chart = echarts.init(el.value);
+  chart.on("legendselectchanged", (event: unknown) => {
+    selectedLegends = {
+      ...selectedLegends,
+      ...(event as { selected: Record<string, boolean> }).selected,
+    };
+    if (latestData) draw(latestData);
+  });
+  chart.on("datazoom", (event: unknown) => {
+    const e = event as {
+      start?: number;
+      end?: number;
+      batch?: { start?: number; end?: number }[];
+    };
+    const z = e.batch?.[0] ?? e;
+    if (typeof z.start === "number" && typeof z.end === "number") {
+      zoomTouched = true;
+      zoomWindow = { start: z.start, end: z.end };
+    }
+    if (latestData) draw(latestData);
+  });
   observer = new ResizeObserver(() => chart?.resize());
   observer.observe(el.value!);
   document.addEventListener("visibilitychange", visibility);
@@ -563,7 +831,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <dl
-    v-if="snapshot.length"
+    v-if="snapshot.length && !hideSnapshot"
     class="chart-snapshot"
     aria-label="当前分时行情摘要"
   >
@@ -581,15 +849,5 @@ onBeforeUnmount(() => {
       ><button @click="refresh">重试</button>
     </div>
     <span v-else-if="loading" class="chart-loading">更新行情…</span>
-  </div>
-  <div class="chart-caption">
-    <span
-      >腾讯公开行情 · 可能延迟 · 不保证成交<span
-        v-if="trades"
-        title="B买入、S卖出；日K同一天同时买卖合并为T，不要求数量相同。仅显示当前图表范围内的手工成交，期初快照不标注。日K按K线定位，悬停查看各笔方向和原始成交价，不是交易建议。"
-      >
-        · BS成交 {{ markedCount }}笔</span
-      ></span
-    ><span>{{ meta }}</span>
   </div>
 </template>

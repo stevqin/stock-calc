@@ -360,23 +360,52 @@ body,
 .history-search-toolbar {
   position: sticky;
   left: 0;
-  display: flex;
-  align-items: flex-end;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
   min-width: min(100%, 560px);
-  padding: 10px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid #edf1f6;
   background: #fff;
   z-index: 2;
 }
 .history-search-toolbar > .security-search {
-  width: min(360px, 100%);
+  width: 100%;
+  min-width: 0;
+}
+.history-search-toolbar-scoped {
+  grid-template-columns: auto auto;
+  justify-content: start;
+}
+.history-date-range {
+  display: grid;
+  grid-template-columns: auto 128px auto 128px;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  color: var(--ui-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.history-date-range input {
+  box-sizing: border-box;
+  width: 128px;
+  min-width: 0;
+  height: 30px;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.history-date-separator {
+  color: #a0aaba;
 }
 .history-filter-result {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: var(--ui-field-height);
+  min-height: 30px;
   color: var(--ui-muted);
   font-size: 12px;
 }
@@ -394,11 +423,17 @@ body,
 .history-filter-result button {
   white-space: nowrap;
 }
-@media (max-width: 720px) {
+@media (max-width: 560px) {
   .history-search-toolbar {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
+    align-items: center;
     gap: 8px;
+  }
+  .history-date-range {
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+  .history-date-range input {
+    width: 100%;
   }
   .history-filter-result {
     justify-content: space-between;
@@ -1016,6 +1051,26 @@ body,
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Text actions keep their text appearance through pointer and keyboard states. */
+.securities-table :is(.security-name, .pnl-link, th button),
+.securities-table
+  :is(.security-name, .pnl-link, th button):is(
+    :hover,
+    :active,
+    :focus,
+    :focus-visible
+  ) {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
+}
+.securities-table :is(.security-name, .pnl-link, th button):focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .security-name.security-name-long {
   display: block;
@@ -2554,7 +2609,8 @@ body,
   color: #9aa7b8;
   font-style: normal;
 }
-.plan-market-value > strong {
+.plan-market-value > strong,
+.plan-trade-amount > strong {
   display: block;
 }
 .plan-result-note {
@@ -2651,4 +2707,62 @@ body,
 .plan-calculation-details,
 .plan-result-note {
   grid-column: 1 / -1;
+}
+
+.security-drawer.security-drawer-chart {
+  width: min(640px, calc(100vw - 32px));
+}
+.security-drawer-chart .quote-chart-main .segmented {
+  height: 34px;
+  align-items: center;
+  border-bottom: 1px solid #edf1f6;
+}
+.security-drawer-chart .quote-chart-main .segmented button {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  height: 34px;
+}
+.security-drawer-chart .quote-chart-main .segmented button.active {
+  color: #3268cf;
+  border-bottom: 2px solid #3268cf;
+}
+.security-drawer-chart .drawer-chart {
+  height: 408px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.security-drawer > .drawer-tabs {
+  padding-bottom: 4px;
+}
+.security-drawer > header,
+.security-drawer > .drawer-tabs {
+  border-bottom: 0;
+}
+.security-drawer > .drawer-quote-overview {
+  flex: 0 0 auto;
+  margin: 4px 14px 0;
+}
+.security-drawer-chart > .drawer-section {
+  padding-top: 2px;
+}
+
+.history-search-toolbar .security-search input {
+  height: 30px;
+  font-size: 12px;
+}
+.history-filter-result .history-selection-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.history-range-error {
+  margin: 4px 12px;
+  font-size: 11px;
+  color: #bd4552;
 }

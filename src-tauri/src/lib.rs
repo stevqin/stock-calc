@@ -33,6 +33,7 @@ pub struct Quote {
     pb_ratio: Option<String>,
     float_cap: Option<String>,
     volume: Option<String>,
+    raw_fields: Vec<String>,
     source: String,
 }
 fn metric(fields: &[&str], i: usize, signed: bool) -> Option<String> {
@@ -129,6 +130,7 @@ fn parse_quote(bytes: &[u8], market: &str, code: &str) -> Result<Quote, String> 
             .flatten(),
         float_cap: metric(&fields, 44, false),
         volume: metric(&fields, 6, false),
+        raw_fields: fields.iter().map(|value| (*value).to_owned()).collect(),
         source: "腾讯公开行情".into(),
     })
 }
@@ -333,6 +335,21 @@ mod tests {
         let text = format!("v_sh{}=\"{}\";", code, fields.join("~"));
         let (bytes, _, _) = encoding_rs::GBK.encode(&text);
         bytes.into_owned()
+    }
+    #[test]
+    fn quote_preserves_all_wire_fields_including_empty_and_future_fields() {
+        let bytes = fixture("600519", "股票", "10", "GP-A");
+        let (decoded, _, _) = encoding_rs::GBK.decode(&bytes);
+        let text = decoded.replace("\";", "~future-value~~\";");
+        let (wire, _, _) = encoding_rs::GBK.encode(&text);
+        let q = parse_quote(&wire, "sh", "600519").unwrap();
+        let value = serde_json::to_value(q).unwrap();
+        let fields = value["rawFields"].as_array().expect("all source fields retained");
+        assert_eq!(fields.len(), 66);
+        assert_eq!(fields[1], "股票");
+        assert_eq!(fields[63], "future-value");
+        assert_eq!(fields[64], "");
+        assert_eq!(fields[65], "");
     }
     #[test]
     fn background_market_requests_survive_minimize_and_hide() {

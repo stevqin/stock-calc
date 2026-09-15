@@ -245,17 +245,19 @@ body.status-panel-window {
   background: transparent;
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  --panel-surface: rgba(248, 249, 251, 0.58);
+  --selection: rgba(0, 122, 255, 0.055);
   --header-title: #282828;
-  --header-secondary: #686868;
-  --table-label: #5c5c5c;
+  --header-secondary: #414955;
+  --table-label: #414955;
   --text-primary: #202631;
-  --text-secondary: #566170;
-  --text-tertiary: #626e7c;
+  --text-secondary: #414955;
+  --text-tertiary: #414955;
   --muted: var(--text-secondary);
-  --gain: #b52e3d;
-  --loss: #176a4a;
-  --gain-secondary: #9b4550;
-  --loss-secondary: #3d6b57;
+  --gain: #962334;
+  --loss: #115438;
+  --gain-secondary: #882c3b;
+  --loss-secondary: #20533e;
   --action: #245fb5;
   --line: rgba(90, 100, 115, 0.085);
   --wash: rgba(255, 255, 255, 0.08);
@@ -275,12 +277,7 @@ body.status-panel-window {
   border-radius: 18px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.48);
-  background: linear-gradient(
-    145deg,
-    rgba(255, 255, 255, 0.1),
-    rgba(245, 247, 252, 0.02) 48%,
-    rgba(255, 255, 255, 0.08)
-  );
+  background: var(--panel-surface);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.8),
     inset 0 -1px 0 rgba(255, 255, 255, 0.25);
@@ -393,7 +390,7 @@ body.status-panel-window {
   font-size: 10px;
 }
 .status-panel tbody tr.is-active {
-  background: rgba(0, 122, 255, 0.12);
+  background: var(--selection);
   box-shadow: inset 2px 0 0 rgba(0, 122, 255, 0.6);
 }
 .status-panel td strong {
@@ -451,6 +448,22 @@ body.status-panel-window {
 }
 .status-panel .edit-alias {
   color: var(--header-secondary);
+}
+.status-panel .edit-alias,
+.status-panel .edit-alias:is(:hover, :active, :focus, :focus-visible) {
+  appearance: none;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  outline: none;
+  border-radius: 0;
+}
+.status-panel .edit-alias:hover {
+  color: var(--action);
+}
+.status-panel .edit-alias:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .status-panel .quit-app {
   color: var(--text-secondary);
@@ -530,12 +543,14 @@ body.status-panel-window {
 }
 @media (prefers-color-scheme: dark) {
   body.status-panel-window {
+    --panel-surface: rgba(34, 37, 43, 0.58);
+    --selection: rgba(100, 170, 255, 0.08);
     --header-title: #f0f0f0;
-    --header-secondary: #b5b5b5;
-    --table-label: #c2c2c2;
+    --header-secondary: #e0e5ed;
+    --table-label: #e0e5ed;
     --text-primary: #fafbfe;
     --text-secondary: #d2d9e3;
-    --text-tertiary: #a9b4c3;
+    --text-tertiary: #d2d9e3;
     --gain: #ff8790;
     --loss: #75d5ad;
     --gain-secondary: #f3a2a9;
@@ -546,11 +561,6 @@ body.status-panel-window {
     --hover: rgba(255, 255, 255, 0.12);
   }
   .status-panel {
-    background: linear-gradient(
-      145deg,
-      rgba(58, 61, 70, 0.12),
-      rgba(28, 30, 38, 0.05)
-    );
     border-color: rgba(255, 255, 255, 0.22);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   }

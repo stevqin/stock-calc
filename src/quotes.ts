@@ -23,6 +23,7 @@ export interface Quote {
   pbRatio?: string | null;
   floatCap?: string | null; // 亿元, source's circulating market value, not ETF NAV
   volume?: string | null; // 手
+  rawFields?: string[]; // Complete ordered Tencent payload, including empty/unknown fields.
   source?: string;
 }
 

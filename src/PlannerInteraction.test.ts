@@ -348,6 +348,12 @@ it("突出扣费做T收益，并分别显示交易后成本和按现价估算的
   await input("买入价").setValue("9");
   await input("卖出价").setValue("11");
   expect(wrapper.get(".plan-net-profit").text()).toContain("199.80");
+  expect(wrapper.get('[aria-label="买入金额"]').text()).toContain("900.09");
+  expect(wrapper.get('[aria-label="卖出金额"]').text()).toContain("1,100.11");
+  await input("卖出数量").setValue("200");
+  expect(wrapper.get('[aria-label="卖出金额"]').text()).toContain("2,200.22");
+  expect(wrapper.get('[aria-label="买入金额"]').text()).toContain("900.09");
+  await input("卖出数量").setValue("100");
   expect(wrapper.get(".plan-holding-cost").text()).toContain("10.0000");
   expect(wrapper.get(".plan-holding-cost").text()).toContain("9.8002");
   expect(wrapper.get(".plan-market-value").text()).toContain("10,000.00");
@@ -365,4 +371,83 @@ it("买卖价格旁分别显示相对行情昨收的涨跌幅", async () => {
     "较昨收 -10.00%",
     "较昨收 +10.00%",
   ]);
+});
+
+it("快捷股数按各自价格折算，点击和行情刷新都不重置已填数量", async () => {
+  await start();
+  await input("买入价").setValue("3.4");
+  const buyButtons = () =>
+    wrapper.findAll('button[aria-label^="买入数量设为"]');
+  expect(buyButtons().map((b) => b.text())).toEqual([
+    "100",
+    "1400",
+    "2900",
+    "5800",
+    "8800",
+    "14700",
+    "23500",
+    "29400",
+  ]);
+  await wrapper.get('[aria-label="买入数量设为14700"]').trigger("click");
+  expect(value("买入数量")).toBe("14700");
+  marketQuotes.sh510300.latest = "5";
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(value("买入数量")).toBe("14700");
+  expect(wrapper.find('[aria-label="卖出数量设为20000"]').exists()).toBe(true);
+  expect(wrapper.find('[aria-label="卖出数量设为1000"]').exists()).toBe(true);
+  await input("买入价").setValue("1500");
+  expect(buyButtons().map((b) => b.text())).toEqual(["100"]);
+  expect(value("买入数量")).toBe("14700");
+  await input("买入价").setValue("");
+  expect(buyButtons().map((b) => b.text())).toEqual(["100"]);
+});
+
+it("交易录入快捷股数随成交价格更新", async () => {
+  await start({ action: "record", initialTab: "trades" });
+  await wrapper.get("#trade-entry-price").setValue("3.4");
+  const buttons = wrapper.findAll(".quantity-shortcuts button");
+  expect(buttons.map((b) => b.text())).toContain("29400");
+  await buttons.find((b) => b.text() === "5800")!.trigger("click");
+  expect(
+    (wrapper.get("#trade-entry-quantity").element as HTMLInputElement).value,
+  ).toBe("5800");
+});
+
+it("每次打开交易录入使用打开时刻，自动恢复草稿不恢复旧成交时间", async () => {
+  vi.useRealTimers();
+  vi.useFakeTimers({
+    toFake: [
+      "Date",
+      "setInterval",
+      "clearInterval",
+      "setTimeout",
+      "clearTimeout",
+    ],
+  });
+  vi.setSystemTime(new Date("2026-09-15T04:30:00Z"));
+  vi.mocked(readDraft).mockImplementation(async (key) =>
+    key.endsWith(":entry")
+      ? {
+          price: "3.40",
+          quantity: "200",
+          time: "2026-08-25T09:00:00",
+          note: "",
+          feeSource: "estimated",
+        }
+      : undefined,
+  );
+  await start({ action: "record", initialTab: "trades" });
+  const time = () => wrapper.get('input[type="datetime-local"]');
+  expect((time().element as HTMLInputElement).value).toContain(
+    "2026-09-15T12:30",
+  );
+  await time().setValue("2026-09-10T09:35");
+  await vi.advanceTimersByTimeAsync(3000);
+  expect((time().element as HTMLInputElement).value).toBe("2026-09-10T09:35");
+  wrapper.unmount();
+  vi.setSystemTime(new Date("2026-09-15T05:00:00Z"));
+  await start({ action: "record", initialTab: "trades" });
+  expect((time().element as HTMLInputElement).value).toContain(
+    "2026-09-15T13:00",
+  );
 });

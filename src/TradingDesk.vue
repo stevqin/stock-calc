@@ -13,6 +13,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { statusBarFrames, shortNames, type StatusSnapshot } from "./statusBar";
 import { quoteAge } from "./quotes";
+import QuoteDetails from "./components/QuoteDetails.vue";
 import SecuritiesTable from "./components/SecuritiesTable.vue";
 import FloatingNotice from "./components/FloatingNotice.vue";
 import SummaryHelp from "./components/SummaryHelp.vue";
@@ -1472,6 +1473,7 @@ onBeforeUnmount(() => {
           >
             <aside
               class="security-drawer"
+              :class="{ 'security-drawer-chart': detailTab === 'chart' }"
               role="dialog"
               aria-modal="true"
               aria-labelledby="security-detail-title"
@@ -1494,17 +1496,6 @@ onBeforeUnmount(() => {
                   ×
                 </button>
               </header>
-              <div class="drawer-price">
-                <strong :class="tone(marketQuotes[selected]?.change)">{{
-                  money(
-                    marketQuotes[selected]?.latest,
-                    security.asset === "etf" ? 3 : 2,
-                  )
-                }}</strong
-                ><span :class="tone(marketQuotes[selected]?.change)"
-                  >{{ marketQuotes[selected]?.change ?? "—" }}%</span
-                >
-              </div>
               <nav class="drawer-tabs">
                 <button
                   v-for="t in [
@@ -1520,24 +1511,42 @@ onBeforeUnmount(() => {
                   {{ t.name }}
                 </button>
               </nav>
+              <QuoteDetails
+                class="drawer-quote-overview"
+                :quote="marketQuotes[selected]"
+                :security="security"
+                hero-only
+              />
               <div v-if="detailTab === 'chart'" class="drawer-section">
-                <div class="segmented">
-                  <button
-                    v-for="m in detailModes"
-                    :key="m.id"
-                    :class="{ active: detailMode === m.id }"
-                    @click="detailMode = m.id"
-                  >
-                    {{ m.name }}
-                  </button>
-                </div>
-                <div class="drawer-chart">
-                  <MarketChart
-                    :security="security"
-                    :mode="detailMode"
-                    :trades="account.entries"
-                  />
-                </div>
+                <QuoteDetails
+                  :quote="marketQuotes[selected]"
+                  :security="security"
+                  :mode="detailMode"
+                  hide-hero
+                >
+                  <template #chart="{ setChipVisible }">
+                    <div class="segmented">
+                      <button
+                        v-for="m in detailModes"
+                        :key="m.id"
+                        :class="{ active: detailMode === m.id }"
+                        @click="detailMode = m.id"
+                      >
+                        {{ m.name }}
+                      </button>
+                    </div>
+                    <div class="drawer-chart">
+                      <MarketChart
+                        :security="security"
+                        :mode="detailMode"
+                        @chips-visibility="setChipVisible"
+                        quote-style
+                        hide-snapshot
+                        :trades="account.entries"
+                      />
+                    </div>
+                  </template>
+                </QuoteDetails>
                 <dl class="impact-list">
                   <div>
                     <dt>持仓 / 估算可卖</dt>

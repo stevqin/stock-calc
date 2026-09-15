@@ -50,7 +50,7 @@ pub fn parse_chart(v: Value, symbol: &str, mode: &str) -> Result<Value, String> 
             bars.push(json!({"date":date,"open":open,"close":close,"high":high,"low":low,"volume":required(&r[5])?}));
         }
         return Ok(
-            json!({"symbol":symbol,"mode":mode,"bars":bars,"sessions":[],"adjustment":if d.get("qfqday").is_some(){"前复权"}else{"不复权"},"fetchedAt":updated}),
+            json!({"symbol":symbol,"mode":mode,"bars":bars,"sessions":[],"historyWindow":400,"adjustment":if d.get("qfqday").is_some(){"前复权"}else{"不复权"},"fetchedAt":updated}),
         );
     }
     let sessions: Vec<Value> = if mode == "intraday" {
@@ -127,10 +127,10 @@ async fn request_chart(
     let symbol = format!("{market}{code}");
     let url = match mode {
         "daily" => format!(
-            "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,180,qfq"
+            "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,400,qfq"
         ),
         "daily-raw" => {
-            format!("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,180,")
+            format!("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,400,")
         }
         "intraday" => format!("https://web.ifzq.gtimg.cn/appstock/app/minute/query?code={symbol}"),
         "five-day" => format!("https://web.ifzq.gtimg.cn/appstock/app/day/query?code={symbol}"),

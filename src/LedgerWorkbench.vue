@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quantityShortcuts } from "./quantityShortcuts";
 import FloatingNotice from "./components/FloatingNotice.vue";
 import {
   computed,
@@ -100,6 +101,33 @@ const selected = ref(props.symbol ?? account.value.selectedId),
 const historyTarget = ref<HistoryTarget>();
 const tradeTypeLabels = computed(() => tradeLabels(account.value.entries));
 const historyFilterId = ref("");
+const historyStart = ref("");
+const historyEnd = ref("");
+function historyFilterTime(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return NaN;
+  const time = new Date(`${value}T00:00:00+08:00`);
+  return Number.isFinite(time.getTime()) &&
+    localDateTime(time).slice(0, 10) === value
+    ? time.getTime()
+    : NaN;
+}
+const historyBounds = computed(() => {
+  try {
+    const start = historyStart.value
+      ? historyFilterTime(historyStart.value)
+      : -Infinity;
+    const end = historyEnd.value
+      ? historyFilterTime(historyEnd.value) + 86400000 - 1
+      : Infinity;
+    return {
+      start,
+      end,
+      invalid: Number.isNaN(start) || Number.isNaN(end) || start > end,
+    };
+  } catch {
+    return { start: 0, end: 0, invalid: true };
+  }
+});
 const historySearchKey = ref(0);
 const historyFilterSecurity = computed(() =>
   account.value.securities.find((s) => s.id === historyFilterId.value),
@@ -121,6 +149,13 @@ const tradeRows = computed(() =>
         !effectiveHistorySecurityId.value ||
         e.securityId === effectiveHistorySecurityId.value,
     )
+    .filter((e) => {
+      const bounds = historyBounds.value;
+      if (bounds.invalid) return false;
+      if (!historyStart.value && !historyEnd.value) return true;
+      const time = Date.parse(e.time);
+      return time >= bounds.start && time <= bounds.end;
+    })
     .slice()
     .reverse(),
 );
@@ -138,6 +173,8 @@ function filterHistory(hit: SecurityHit) {
   historyFilterId.value = hit.market + hit.code;
 }
 function clearHistoryFilter() {
+  historyStart.value = "";
+  historyEnd.value = "";
   historyFilterId.value = "";
   historySearchKey.value += 1;
 }
@@ -505,14 +542,14 @@ function validTradeDraft(d: unknown): d is Record<string, unknown> {
     )
   );
 }
-function restoreTradeDraft(d: Record<string, unknown>) {
+function restoreTradeDraft(d: Record<string, unknown>, restoreTime = true) {
   orderPrice.value = d.price as string;
   // Older drafts with a price are manual: never replace historical fills.
   tradePriceLocked.value =
     d.priceMode === "manual" ||
     (d.priceMode !== "follow" && !!orderPrice.value);
   orderQty.value = d.quantity as string;
-  tradeTime.value = d.time as string;
+  if (restoreTime) tradeTime.value = d.time as string;
   tradeNote.value = d.note as string;
   feeSource.value = d.feeSource === "actual" ? "actual" : "estimated";
   for (const key of ["commission", "stamp", "transfer"] as const) {
@@ -948,7 +985,7 @@ onMounted(async () => {
         try {
           const d = await readDraft(tradeDraftKey());
           if (d && !validTradeDraft(d)) throw new Error("草稿格式无效");
-          if (validTradeDraft(d)) restoreTradeDraft(d);
+          if (validTradeDraft(d)) restoreTradeDraft(d, false);
           for (const suffix of ["buy", "sell", ""]) {
             const key = `trade:${selected.value}${suffix ? ":" + suffix : ""}`;
             const legacy = await readDraft(key);
@@ -1406,7 +1443,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             </div>
             <div class="quantity-shortcuts">
               <button
-                v-for="q in [100, 200, 500, 800, 1000, 1500, 2000, 3000]"
+                v-for="q in quantityShortcuts(orderPrice)"
                 :key="q"
                 type="button"
                 :class="{ chosen: orderQty === String(q) }"
@@ -1747,8 +1784,13 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
         </p>
       </div>
       <div v-else-if="tab === 'trades'" class="table-scroll">
-        <div v-if="!historySecurityId" class="history-search-toolbar">
+        <div
+          class="history-search-toolbar"
+          :class="{ 'history-search-toolbar-scoped': historySecurityId }"
+        >
           <SecuritySearch
+            v-if="!historySecurityId"
+            compact
             :key="historySearchKey"
             :securities="historySecurities"
             local-only
@@ -1756,23 +1798,45 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             @select="filterHistory"
             @clear="historyFilterId = ''"
           />
-          <div v-if="historyFilterSecurity" class="history-filter-result">
-            <span>
-              当前显示 <b>{{ historyFilterSecurity.name }}</b>
-              <small
-                >{{ historyFilterSecurity.market.toUpperCase() }}
-                {{ historyFilterSecurity.code }}</small
-              >
-            </span>
+          <div class="history-date-range" role="group" aria-label="日期范围">
+            <span class="history-date-caption">日期</span>
+            <input
+              v-model="historyStart"
+              type="date"
+              aria-label="开始日期"
+              title="留空表示不限开始日期"
+              :aria-invalid="historyBounds.invalid"
+            />
+            <span class="history-date-separator" aria-hidden="true">—</span>
+            <input
+              v-model="historyEnd"
+              type="date"
+              aria-label="结束日期"
+              title="包含所选日期；留空表示不限结束日期"
+              :aria-invalid="historyBounds.invalid"
+            />
+          </div>
+          <div class="history-filter-result">
+            <span class="history-selection-name">{{
+              historyFilterSecurity?.name
+            }}</span>
             <button
               type="button"
               class="text-button"
+              :disabled="!historyFilterId && !historyStart && !historyEnd"
               @click="clearHistoryFilter"
             >
               清除筛选
             </button>
           </div>
         </div>
+        <p
+          v-if="historyBounds.invalid"
+          class="history-range-error"
+          role="alert"
+        >
+          开始日期时间不能晚于结束日期时间，请调整筛选范围。
+        </p>
         <table
           class="ledger-history-table trade-history-table"
           :class="{ 'compact-history': historyCompact }"
@@ -1973,17 +2037,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               >
                 <div class="quantity-shortcuts">
                   <button
-                    v-for="n in [
-                      '100',
-                      '200',
-                      '500',
-                      '1000',
-                      '1500',
-                      '2000',
-                      '2500',
-                    ]"
+                    v-for="n in quantityShortcuts(plan.buyPrice)"
                     :key="n"
                     :aria-label="`买入数量设为${n}`"
+                    :class="{ chosen: plan.buyQty === n }"
                     @click="plan.buyQty = n"
                   >
                     {{ n }}
@@ -2031,17 +2088,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               >
                 <div class="quantity-shortcuts">
                   <button
-                    v-for="n in [
-                      '100',
-                      '200',
-                      '500',
-                      '1000',
-                      '1500',
-                      '2000',
-                      '2500',
-                    ]"
+                    v-for="n in quantityShortcuts(plan.sellPrice)"
                     :key="n"
                     :aria-label="`卖出数量设为${n}`"
+                    :class="{ chosen: plan.sellQty === n }"
                     @click="plan.sellQty = n"
                   >
                     {{ n }}
@@ -2051,6 +2101,26 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             </div>
           </div>
           <div v-if="forwardResult.result" class="planner-results">
+            <div class="plan-holding-overview">
+              <section class="plan-trade-amount" aria-label="买入金额">
+                <span class="plan-result-label"
+                  >买入金额 <small>元</small></span
+                >
+                <strong>{{ money(forwardResult.result.buy.cash) }}</strong>
+              </section>
+              <section class="plan-trade-amount" aria-label="卖出金额">
+                <span class="plan-result-label"
+                  >卖出金额 <small>元</small></span
+                >
+                <strong>{{
+                  money(
+                    new Decimal(forwardResult.result.sell.amount)
+                      .plus(forwardResult.result.sell.total)
+                      .toFixed(2),
+                  )
+                }}</strong>
+              </section>
+            </div>
             <section class="plan-net-profit" aria-label="本次做T净收益">
               <div class="plan-result-label">
                 本次做T净收益 <span>已扣费用</span>

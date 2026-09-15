@@ -996,3 +996,18 @@ describe("重构工作台集成", () => {
     expect(wrapper.find(".entry-dialog").exists()).toBe(false);
   });
 });
+
+it("四个详情页签共用同一股价区域，不重复也不随切换重建", async () => {
+  await start();
+  wrapper.findComponent(SecuritiesTable).vm.$emit("detail", "sh510300");
+  await flushPromises();
+  const overview = wrapper.get(".drawer-quote-overview").element;
+  for (const name of ["行情", "收益明细", "做T测算", "交易记录"]) {
+    await button(name).trigger("click");
+    await flushPromises();
+    expect(wrapper.get(".drawer-quote-overview").element).toBe(overview);
+    expect(wrapper.findAll(".security-drawer .quote-hero")).toHaveLength(1);
+    expect(wrapper.find(".drawer-price").exists()).toBe(false);
+    expect(wrapper.get(".drawer-quote-overview").text()).toContain("52周");
+  }
+});

@@ -16,6 +16,7 @@ const props = withDefaults(
   defineProps<{
     securities: SecurityHit[];
     localOnly?: boolean;
+    compact?: boolean;
     resultHint?: string;
   }>(),
   {
@@ -140,7 +141,11 @@ async function keys(event: KeyboardEvent) {
 
 <template>
   <FloatingNotice :message="searchError" />
-  <div ref="root" class="security-search">
+  <div
+    ref="root"
+    class="security-search"
+    :class="{ 'security-search-compact': compact }"
+  >
     <label :for="id">搜索证券</label>
     <input
       :id="id"
@@ -263,5 +268,26 @@ async function keys(event: KeyboardEvent) {
 }
 .search-status small {
   font-size: 11px;
+}
+.security-search-compact {
+  position: relative;
+}
+.security-search-compact > label,
+.security-search-compact > small {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.security-search-compact .search-candidates {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: max(100%, 280px);
+  margin-top: 4px;
+  background: white;
+  box-shadow: 0 6px 20px #20314920;
+  z-index: 20;
 }
 </style>

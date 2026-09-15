@@ -5,6 +5,7 @@ export interface ChartData {
   adjustment: string;
   fetchedAt: string;
   source?: string;
+  historyWindow?: number;
   /** Officially documented suspension, valued at the referenced raw close. */
   suspensions?: { date: string; referenceDate: string; source: string }[];
   bars: {
@@ -81,6 +82,7 @@ export function chartSeries(data: ChartData) {
     price: (number | null)[] = [],
     average: (number | null)[] = [],
     volume: (number | null)[] = [],
+    volumeChange: (number | null)[] = [],
     baseline: (number | null)[] = [];
   for (const [index, s] of data.sessions.entries()) {
     if (index) {
@@ -88,9 +90,11 @@ export function chartSeries(data: ChartData) {
       price.push(null);
       average.push(null);
       volume.push(null);
+      volumeChange.push(null);
       baseline.push(null);
     }
     let previous = 0;
+    let previousPrice = s.previousClose ? Number(s.previousClose) : NaN;
     const points = new Map(
       s.points
         .filter((point) => intradayTimeIndex(point.time) >= 0)
@@ -109,9 +113,20 @@ export function chartSeries(data: ChartData) {
           : null,
       );
       volume.push(p ? Math.max(0, v - previous) : null);
+      const currentPrice = p ? Number(p.price) : NaN;
+      volumeChange.push(
+        p && Number.isFinite(currentPrice) && Number.isFinite(previousPrice)
+          ? currentPrice - previousPrice
+          : p
+            ? 0
+            : null,
+      );
       baseline.push(s.previousClose ? Number(s.previousClose) : null);
-      if (p) previous = v;
+      if (p) {
+        previous = v;
+        if (Number.isFinite(currentPrice)) previousPrice = currentPrice;
+      }
     }
   }
-  return { labels, price, average, volume, baseline };
+  return { labels, price, average, volume, volumeChange, baseline };
 }

@@ -1,11 +1,12 @@
 import { mount, flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import MarketChart from "./MarketChart.vue";
-import { getChart } from "../market";
+import { getChart, marketQuotes } from "../market";
 import { manualAccount } from "../sim/record";
 import type { ChartData } from "../sim/chart";
 const chart = vi.hoisted(() => ({
   setOption: vi.fn(),
+  on: vi.fn(),
   clear: vi.fn(),
   resize: vi.fn(),
   dispose: vi.fn(),
@@ -99,9 +100,7 @@ it.each(["daily", "intraday", "five-day"] as const)(
       "text",
     ]);
     expect(
-      Math.abs(
-        pole.children[0].shape.y2 - pole.children[0].shape.y1,
-      ),
+      Math.abs(pole.children[0].shape.y2 - pole.children[0].shape.y1),
     ).toBe(32);
     expect(pole.children.at(-1).style.text).toBe("B");
     const tooltip = option().tooltip.formatter([
@@ -115,7 +114,7 @@ it.each(["daily", "intraday", "five-day"] as const)(
     expect(tooltip).toContain("B 买入");
     expect(tooltip).toContain("20元 × 100");
     expect(buy().tooltip.show).toBe(false);
-    expect(wrapper.text()).toContain("BS成交 1笔");
+    expect(wrapper.text()).not.toContain("BS成交");
     await wrapper.setProps({ trades: [{ ...trade, kind: "sell" }] });
     expect(buy().data).toHaveLength(0);
     expect(sell().data).toHaveLength(1);
@@ -137,12 +136,8 @@ it("分时与五日分时使用价格/涨跌幅双轴，展示行情摘要且禁
   expect(option.xAxis[1].data.at(-1)).toBe("08-31 15:00");
   expect(option.xAxis[1].axisLabel.hideOverlap).toBe(false);
   expect(option.xAxis[1].axisLabel.formatter("08-31 09:30")).toBe("09:30");
-  expect(option.xAxis[1].axisLabel.formatter("08-31 11:30")).toBe(
-    "11:30\n",
-  );
-  expect(option.xAxis[1].axisLabel.formatter("08-31 13:00")).toBe(
-    "\n13:00",
-  );
+  expect(option.xAxis[1].axisLabel.formatter("08-31 11:30")).toBe("11:30\n");
+  expect(option.xAxis[1].axisLabel.formatter("08-31 13:00")).toBe("\n13:00");
   expect(option.xAxis[1].axisLabel.formatter("08-31 15:00")).toBe("15:00");
   expect(option.yAxis).toHaveLength(3);
   expect(option.yAxis[0].axisLabel.formatter(10.123456)).toBe("10.123");
@@ -162,6 +157,54 @@ it("分时与五日分时使用价格/涨跌幅双轴，展示行情摘要且禁
   option = chart.setOption.mock.calls.at(-1)![0];
   expect(option.dataZoom).toEqual([]);
   expect(option.yAxis).toHaveLength(3);
+});
+it("分时与五日分时的分钟量按价格涨跌着色，并在新交易日以昨收重新比较", async () => {
+  vi.mocked(getChart).mockResolvedValue({
+    ...data,
+    mode: "five-day",
+    sessions: [
+      {
+        date: "20260828",
+        previousClose: "10",
+        points: [
+          { time: "0930", price: "11", volume: "100", amount: null },
+          { time: "0931", price: "10", volume: "150", amount: null },
+          { time: "0932", price: "10", volume: "200", amount: null },
+        ],
+      },
+      {
+        date: "20260831",
+        previousClose: "20",
+        points: [
+          { time: "0930", price: "19", volume: "20", amount: null },
+          { time: "0931", price: "20", volume: "30", amount: null },
+        ],
+      },
+    ],
+  });
+  wrapper = mount(MarketChart, {
+    props: { security, mode: "five-day", trades: [] },
+  });
+  await flushPromises();
+  const option = chart.setOption.mock.calls.at(-1)![0];
+  const volume = option.series.find(
+    (series: { name: string }) => series.name === "分钟量（手）",
+  );
+  const visibleBars = volume.data.filter(
+    (bar: { value?: number } | null) => bar?.value !== undefined,
+  );
+  expect(
+    visibleBars.map((bar: { value: number; itemStyle: { color: string } }) => [
+      bar.value,
+      bar.itemStyle.color,
+    ]),
+  ).toEqual([
+    [100, "#c6414b"],
+    [50, "#48a579"],
+    [50, "#8f9190"],
+    [20, "#48a579"],
+    [10, "#c6414b"],
+  ]);
 });
 it("日K悬浮卡汇总OHLC、涨跌、振幅、成交量及同日交易，仍允许缩放", async () => {
   const trades = [
@@ -198,7 +241,7 @@ it("切换证券清除原证券标记", async () => {
   await wrapper.setProps({ security: manualAccount().securities[1] });
   await flushPromises();
   expect(chart.clear).toHaveBeenCalled();
-  expect(wrapper.text()).toContain("BS成交 0笔");
+  expect(wrapper.text()).not.toContain("BS成交");
 });
 it("日K同日买卖只显示T，删除一边后恢复单方向，切分时保留BS", async () => {
   const trades = [
@@ -235,4 +278,64 @@ it("日K同日买卖只显示T，删除一边后恢复单方向，切分时保�
   expect(series().map((s: { data: unknown[] }) => s.data.length)).toEqual([
     1, 1,
   ]);
+});
+
+it("行情详情可隐藏重复摘要，同时保留图表和数据更新", async () => {
+  wrapper = mount(MarketChart, {
+    props: { security, mode: "intraday", hideSnapshot: true },
+  });
+  await flushPromises();
+  expect(wrapper.find(".chart-snapshot").exists()).toBe(false);
+  expect(wrapper.find(".chart-canvas").exists()).toBe(true);
+  expect(chart.setOption).toHaveBeenCalled();
+  await wrapper.setProps({ hideSnapshot: false });
+  expect(wrapper.find(".chart-snapshot").exists()).toBe(true);
+});
+
+it("筹码与K线共用价格坐标，MACD独立下方并联动时间轴", async () => {
+  const rawFields = Array(80).fill("");
+  rawFields[72] = "1000000";
+  marketQuotes[security.id] = { rawFields } as never;
+  vi.mocked(getChart).mockResolvedValue({
+    ...data,
+    bars: Array.from({ length: 80 }, (_, i) => ({
+      ...data.bars[0],
+      date: new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
+    })),
+  });
+  wrapper = mount(MarketChart, {
+    props: { security, mode: "daily", quoteStyle: true },
+  });
+  await flushPromises();
+  const option = chart.setOption.mock.calls.at(-1)![0];
+  expect(option.dataZoom[0].start).toBeCloseTo((20 / 79) * 100);
+  expect(option.dataZoom[1].height).toBe(22);
+  const chip = option.series.find(
+    (s: { name: string }) => s.name === "筹码峰·估算",
+  );
+  const shape = chip.renderItem(
+    { coordSys: { x: 64, y: 32, width: 300, height: 200 } },
+    {
+      value: (i: number) => (i === 0 ? 10 : 0.01),
+      coord: ([, price]: number[]) => [64, 232 - (price - 9) * 50],
+    },
+  );
+  expect(shape.shape.y + shape.shape.height / 2).toBe(182);
+  expect(chip.encode.y).toBe(0);
+  expect(
+    option.series.find((s: { name: string }) => s.name === "MACD").yAxisIndex,
+  ).toBe(2);
+  expect(option.dataZoom[0].xAxisIndex).toEqual([0, 1, 2]);
+  const legendChange = chart.on.mock.calls.find(
+    ([name]) => name === "legendselectchanged",
+  )![1];
+  legendChange({ selected: { "筹码峰·估算": false } });
+  expect(chart.setOption.mock.calls.at(-1)![0].grid[0].right).toBe(20);
+  const zoom = chart.on.mock.calls.find(([name]) => name === "datazoom")![1];
+  zoom({ batch: [{ start: 10, end: 40 }] });
+  expect(chart.setOption.mock.calls.at(-1)![0].dataZoom[0].start).toBe(10);
+  legendChange({ selected: { "筹码峰·估算": true } });
+  expect(chart.setOption.mock.calls.at(-1)![0].grid[0].right).toBe(150);
+  expect(chart.setOption.mock.calls.at(-1)![0].dataZoom[0].end).toBe(40);
+  delete marketQuotes[security.id];
 });

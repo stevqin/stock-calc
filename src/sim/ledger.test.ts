@@ -294,8 +294,6 @@ it("分时横轴固定展示完整交易时段边界，五日图按日展示首�
   expect(intradayAxisLabel("08-31 13:00", "intraday")).toBe("\n13:00");
   expect(intradayAxisLabel("08-31 15:00", "intraday")).toBe("15:00");
   expect(intradayAxisLabel("08-31 10:30", "intraday")).toBe("");
-  expect(intradayAxisLabel("08-31 09:30", "five-day")).toBe(
-    "08-31\n09:30",
-  );
+  expect(intradayAxisLabel("08-31 09:30", "five-day")).toBe("08-31\n09:30");
   expect(intradayAxisLabel("08-31 15:00", "five-day")).toBe("15:00");
 });

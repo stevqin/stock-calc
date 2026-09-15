@@ -394,7 +394,7 @@ describe("交易台", () => {
   it("买入记录保存字符串金额和独立费用", async () => {
     await start();
     await wrapper.find('input[placeholder="输入已成交价格"]').setValue("4.600");
-    await button("200").trigger("click");
+    await wrapper.get("#trade-entry-quantity").setValue("200");
     await button("买入").trigger("click");
     await flushPromises();
     const saved = vi.mocked(saveAccount).mock.calls[0][0];
@@ -446,4 +446,58 @@ describe("交易台", () => {
     expect(wrapper.text()).toContain("原数据未覆盖");
     expect(saveAccount).not.toHaveBeenCalled();
   });
+});
+
+it("历史成交按完整日期范围筛选，支持单边、叠加证券筛选及清空", async () => {
+  const a = manualAccount();
+  for (const [id, time] of [
+    ["sh510300", "2026-08-25T01:00:00.000Z"],
+    ["sh510300", "2026-08-26T01:00:59.999Z"],
+    ["sz159915", "2026-08-27T01:00:00.000Z"],
+  ]) {
+    insertRecord(
+      a,
+      draftRecord(a, id, "buy", "10", "100", time, "", {
+        commission: "0.5",
+        stamp: "0",
+        transfer: "0",
+      }).entry,
+    );
+  }
+  wrapper = mount(Workspace, {
+    props: {
+      embedded: true,
+      initialTab: "trades",
+      snapshot: { account: a, revision: 1 },
+    },
+    global: { stubs: { MarketChart: true } },
+  });
+  await flushPromises();
+  const rows = () => wrapper.findAll(".ledger-history-table tbody tr").length;
+  const start = wrapper.get('[aria-label="开始日期"]');
+  const end = wrapper.get('[aria-label="结束日期"]');
+  expect(start.attributes("type")).toBe("date");
+  expect(end.attributes("type")).toBe("date");
+  expect(rows()).toBe(3);
+  await start.setValue("2026-08-26");
+  expect(rows()).toBe(2);
+  await end.setValue("2026-08-26");
+  expect(rows()).toBe(1);
+  await start.setValue("");
+  expect(rows()).toBe(2);
+  wrapper.findComponent(SecuritySearch).vm.$emit(
+    "select",
+    a.securities.find((s) => s.id === "sz159915"),
+  );
+  await flushPromises();
+  expect(rows()).toBe(0);
+  await wrapper.get(".history-filter-result button").trigger("click");
+  expect(rows()).toBe(3);
+  await start.setValue("2026-08-27");
+  await end.setValue("2026-08-25");
+  expect(rows()).toBe(0);
+  expect(wrapper.find('[role="alert"]').exists()).toBe(true);
+  await end.setValue("2099-01-01");
+  expect(rows()).toBe(1);
+  expect(saveAccount).not.toHaveBeenCalled();
 });

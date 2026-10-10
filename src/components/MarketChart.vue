@@ -7,6 +7,7 @@ import {
 } from "../sim/indicators";
 import { ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { isTauri } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as echarts from "echarts/core";
 import {
   CandlestickChart,
@@ -67,7 +68,9 @@ let chart: echarts.ECharts | undefined,
   timer: ReturnType<typeof setTimeout> | undefined,
   generation = 0,
   busy = false,
-  disposed = false;
+  disposed = false,
+  foregroundRefreshPending = false;
+let stopMainActivated: UnlistenFn | undefined;
 const n = (value: number, digits = 2) =>
   Number.isFinite(value) ? value.toFixed(digits) : "—";
 const signed = (value: number, digits = 2, suffix = "") =>
@@ -737,8 +740,12 @@ function draw(d: ChartData) {
     true,
   );
 }
-async function refresh() {
-  if (disposed || document.hidden || busy) return;
+async function refresh(foregroundWake = false) {
+  if (disposed || (!foregroundWake && document.hidden)) return;
+  if (busy) {
+    if (foregroundWake) foregroundRefreshPending = true;
+    return;
+  }
   clearTimeout(timer);
   const token = generation;
   busy = true;
@@ -746,7 +753,13 @@ async function refresh() {
   try {
     if (!isTauri())
       throw new Error("浏览器预览不连接行情，请在Mac桌面版查看真实图表");
-    const data = await getChart(props.security, props.mode, () => !disposed);
+    const data = await getChart(
+      props.security,
+      props.mode,
+      () => !disposed,
+      false,
+      foregroundWake,
+    );
     if (token !== generation) return;
     if (data.symbol !== props.security.id || data.mode !== props.mode)
       throw new Error("图表证券不匹配");
@@ -758,7 +771,10 @@ async function refresh() {
   } finally {
     busy = false;
     if (token === generation) loading.value = false;
-    if (!disposed && !document.hidden) {
+    if (foregroundRefreshPending && !disposed) {
+      foregroundRefreshPending = false;
+      void refresh(true);
+    } else if (!disposed && (foregroundWake || !document.hidden)) {
       if (token !== generation) void refresh();
       else timer = setTimeout(refresh, error.value ? 60000 : 30000);
     }
@@ -818,6 +834,13 @@ onMounted(() => {
   observer = new ResizeObserver(() => chart?.resize());
   observer.observe(el.value!);
   document.addEventListener("visibilitychange", visibility);
+  void listen("main-window-activated", () => {
+    clearTimeout(timer);
+    void refresh(true);
+  }).then((unlisten) => {
+    if (disposed) unlisten();
+    else stopMainActivated = unlisten;
+  });
   void refresh();
 });
 onBeforeUnmount(() => {
@@ -826,6 +849,7 @@ onBeforeUnmount(() => {
   clearTimeout(timer);
   observer?.disconnect();
   chart?.dispose();
+  stopMainActivated?.();
   document.removeEventListener("visibilitychange", visibility);
 });
 </script>
@@ -846,7 +870,7 @@ onBeforeUnmount(() => {
     <div ref="el" class="chart-canvas" aria-label="证券行情图表"></div>
     <div v-if="error" class="chart-notice">
       <span>{{ error }}</span
-      ><button @click="refresh">重试</button>
+      ><button @click="refresh()">重试</button>
     </div>
     <span v-else-if="loading" class="chart-loading">更新行情…</span>
   </div>

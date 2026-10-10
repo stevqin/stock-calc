@@ -7,9 +7,12 @@ import { manualAccount } from "./sim/record";
 import { upgradeWorkspace } from "./sim/workspaceState";
 const mocks = vi.hoisted(() => ({
   wake: vi.fn(),
+  refresh: vi.fn(),
+  refreshFlow: vi.fn(),
   stop: vi.fn(),
   unlisten: vi.fn(),
   tick: undefined as (() => void) | undefined,
+  activated: undefined as (() => void) | undefined,
 }));
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => true,
@@ -18,6 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (_event, callback) => {
     if (_event === "status-bar-tick") mocks.tick = callback;
+    if (_event === "main-window-activated") mocks.activated = callback;
     return mocks.unlisten;
   }),
 }));
@@ -41,11 +45,15 @@ vi.mock("./market", () => ({
   chartKey: (id: string, mode: string) => `${id}:${mode}`,
   makeMarketPoller: () => ({
     setTargets() {},
-    refresh() {},
+    refresh: mocks.refresh,
     refreshIfDue: mocks.wake,
     stop: mocks.stop,
   }),
-  makeFundFlowPoller: () => ({ setTargets() {}, refresh() {}, stop() {} }),
+  makeFundFlowPoller: () => ({
+    setTargets() {},
+    refresh: mocks.refreshFlow,
+    stop() {},
+  }),
 }));
 afterEach(() => {
   vi.restoreAllMocks();
@@ -66,8 +74,11 @@ it("publishes a summary, wakes background quotes, and removes native listeners o
   });
   mocks.tick?.();
   expect(mocks.wake).toHaveBeenCalledOnce();
+  mocks.activated?.();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+  expect(mocks.refreshFlow).toHaveBeenCalledOnce();
   wrapper.unmount();
-  expect(mocks.unlisten).toHaveBeenCalledTimes(2);
+  expect(mocks.unlisten).toHaveBeenCalledTimes(3);
   expect(mocks.stop).toHaveBeenCalledOnce();
 });
 

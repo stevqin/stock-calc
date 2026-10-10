@@ -128,10 +128,10 @@ export class BatchPoller {
   async refreshIfDue() {
     if (Date.now() >= this.nextRefreshAt) await this.refresh();
   }
-  async refresh() {
+  async refresh(forceVisible = false) {
     if (this.disposed || this.busy) return;
     clearTimeout(this.timer);
-    if (!this.visible()) {
+    if (!forceVisible && !this.visible()) {
       this.timer = setTimeout(() => void this.refresh(), this.intervalMs);
       return;
     }
@@ -141,10 +141,10 @@ export class BatchPoller {
     let bad = false;
     try {
       for (let i = 0; i < this.targets.length; i += 50) {
-        if (g !== this.generation || !this.visible()) break;
+        if (g !== this.generation || (!forceVisible && !this.visible())) break;
         const symbols = this.targets.slice(i, i + 50);
         const result = await this.fetcher(symbols);
-        if (g !== this.generation || !this.visible()) break;
+        if (g !== this.generation || (!forceVisible && !this.visible())) break;
         const allowed = new Set(symbols.map((s) => s.id));
         if (result.quotes.some((q) => !allowed.has(q.market + q.code)))
           throw new Error("批量报价证券不匹配");
@@ -276,11 +276,13 @@ export async function getChart(
   mode: ChartMode,
   active: () => boolean = () => true,
   background = false,
+  foregroundWake = false,
 ): Promise<ChartData> {
   const key = chartKey(s.id, mode),
     cached = marketCharts[key];
   const daily = mode === "daily" || mode === "daily-raw";
   if (
+    !foregroundWake &&
     cached &&
     (daily
       ? (cached.historyWindow ?? 0) >= 400 &&
@@ -289,13 +291,13 @@ export async function getChart(
   )
     return cached;
   if (inFlight.has(key)) return inFlight.get(key)!;
-  if ((failedUntil.get(key) ?? 0) > Date.now()) {
+  if (!foregroundWake && (failedUntil.get(key) ?? 0) > Date.now()) {
     if (cached) return cached;
     throw new Error(marketErrors[key] || "行情重试等待中");
   }
   const job = queue
     .run(async () => {
-      if ((!background && document.hidden) || !active())
+      if ((!background && !foregroundWake && document.hidden) || !active())
         throw new Error("图表不可见，等待重新显示");
       if (!isTauri()) throw new Error("桌面版提供实时走势");
       const data = await invoke<ChartData>("fetch_chart", {

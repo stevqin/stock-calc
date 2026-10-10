@@ -902,6 +902,7 @@ watch(menuBarSnapshot, (snapshot) => {
 });
 let stopMenuAlias: UnlistenFn | undefined;
 let stopMenuBarTick: UnlistenFn | undefined;
+let stopMainActivated: UnlistenFn | undefined;
 const poller = makeMarketPoller(menuBarEnabled);
 const flowPoller = makeFundFlowPoller();
 let clockTimer: ReturnType<typeof setInterval>,
@@ -920,15 +921,17 @@ function targets() {
   poller.setTargets(symbols);
   flowPoller.setTargets(symbols);
 }
-async function refreshCharts() {
-  if (!ready.value || (document.hidden && !menuBarEnabled)) return;
+async function refreshCharts(foregroundWake = false) {
+  if (!ready.value || (!foregroundWake && document.hidden && !menuBarEnabled))
+    return;
   const ids = [...new Set([...visible.value, ...holdingIds.value])];
   for (const id of ids) {
     const s = securities.value.get(id);
     if (!s) continue;
     const active = () =>
       visible.value.includes(id) || holdingIds.value.includes(id);
-    if (!document.hidden) void getChart(s, "daily", active).catch(() => {});
+    if (foregroundWake || !document.hidden)
+      void getChart(s, "daily", active, false, foregroundWake).catch(() => {});
     if (holdingIds.value.includes(id))
       void getChart(s, "daily-raw", active, menuBarEnabled).catch(() => {});
   }
@@ -1068,6 +1071,12 @@ onMounted(async () => {
         void poller.refreshIfDue();
         void refreshCharts();
       });
+      stopMainActivated = await listen("main-window-activated", () => {
+        clock.value = Date.now();
+        void poller.refresh(true);
+        void flowPoller.refresh(true);
+        void refreshCharts(true);
+      });
       stopMenuAlias = await listen<{ id: string; name: string }>(
         "status-alias",
         ({ payload }) => {
@@ -1104,6 +1113,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopMenuBarTick?.();
   stopMenuAlias?.();
+  stopMainActivated?.();
   poller.stop();
   flowPoller.stop();
   clearInterval(clockTimer);

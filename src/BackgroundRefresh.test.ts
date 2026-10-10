@@ -61,3 +61,23 @@ it("passes the background flag through the native raw daily chart request", asyn
     background: true,
   });
 });
+
+it("allows a native foreground wake to bypass stale document.hidden without requesting background access", async () => {
+  vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+  const security = manualAccount().securities[1];
+  vi.mocked(invoke).mockResolvedValueOnce({
+    symbol: security.id,
+    mode: "intraday",
+    bars: [],
+    sessions: [],
+    adjustment: "不复权",
+    fetchedAt: new Date().toISOString(),
+  });
+  await getChart(security, "intraday", () => true, false, true);
+  expect(invoke).toHaveBeenCalledWith("fetch_chart", {
+    market: security.market,
+    code: security.code,
+    mode: "intraday",
+    background: false,
+  });
+});

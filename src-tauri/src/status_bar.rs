@@ -369,6 +369,7 @@ fn show_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        let _ = app.emit_to("main", "main-window-activated", ());
     }
 }
 #[cfg(target_os = "macos")]
@@ -378,8 +379,16 @@ fn install_panel_material(panel: &tauri::WebviewWindow) -> Result<(), Box<dyn st
         NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle, NSWindow,
     };
     let mtm = MainThreadMarker::new().ok_or("玻璃材质必须运行在主线程")?;
+    let ptr = panel.ns_window()?;
+    // The host NSWindow must remain fully transparent and shadowless. AppKit's
+    // default rectangular window shadow otherwise remains visible behind the
+    // rounded glass content view.
+    unsafe {
+        let window = &*ptr.cast::<NSWindow>();
+        window.setOpaque(false);
+        window.setHasShadow(false);
+    }
     if objc2::available!(macos = 26.0) {
-        let ptr = panel.ns_window()?;
         // Tauri retains the live window; retain its content before reparenting.
         unsafe {
             let window = &*ptr.cast::<NSWindow>();
@@ -420,6 +429,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
     .title("T刻 · 持仓速览")
     .inner_size(300.0, 520.0)
     .transparent(true)
+    .shadow(false)
     .visible(false)
     .decorations(false)
     .resizable(false)

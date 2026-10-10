@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 mod charts;
 mod fund_flows;
 mod history_store;
@@ -277,9 +279,16 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             #[cfg(target_os = "macos")]
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            {
+                if let tauri::WindowEvent::Focused(true) = event {
+                    if window.label() == "main" {
+                        let _ = window.emit("main-window-activated", ());
+                    }
+                }
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (window, event);
@@ -344,7 +353,9 @@ mod tests {
         let (wire, _, _) = encoding_rs::GBK.encode(&text);
         let q = parse_quote(&wire, "sh", "600519").unwrap();
         let value = serde_json::to_value(q).unwrap();
-        let fields = value["rawFields"].as_array().expect("all source fields retained");
+        let fields = value["rawFields"]
+            .as_array()
+            .expect("all source fields retained");
         assert_eq!(fields.len(), 66);
         assert_eq!(fields[1], "股票");
         assert_eq!(fields[63], "future-value");

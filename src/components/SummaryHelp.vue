@@ -29,6 +29,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", closeOnEscape));
       ref="trigger"
       type="button"
       class="summary-help-trigger"
+      :class="{ open }"
       :title="`查看${props.label}说明`"
       @click.stop="show"
     >

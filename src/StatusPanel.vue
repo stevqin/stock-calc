@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
         {{ editing ? "完成" : "编辑" }}
       </button>
     </header>
-    <p v-if="error" role="alert" class="panel-error">{{ error }}</p>
+    <p v-if="error" class="panel-error">{{ error }}</p>
     <StatusIntradayChart
       v-if="chartHolding"
       :key="chartHolding.id"
@@ -160,7 +160,7 @@ onBeforeUnmount(() => {
       :active="panelVisible"
     />
     <div class="holdings-scroll">
-      <table aria-label="菜单栏持仓列表">
+      <table>
         <colgroup>
           <col style="width: 30%" />
           <col style="width: 18%" />
@@ -182,7 +182,6 @@ onBeforeUnmount(() => {
             v-for="(row, index) in snapshot?.holdings"
             :key="row.id"
             :class="{ 'is-active': activeIndex === index }"
-            :aria-current="activeIndex === index ? 'true' : undefined"
           >
             <td>
               <strong :title="`${row.name} · ${row.id.toUpperCase()}`"
@@ -191,7 +190,7 @@ onBeforeUnmount(() => {
               <small class="stock-code">{{ row.id.toUpperCase() }}</small>
               <label v-if="editing" class="alias-label"
                 >简称<input
-                  :aria-label="`${row.name}的菜单栏简称`"
+                  class="alias-input"
                   :value="drafts[row.id] ?? row.shortName"
                   @input="
                     drafts[row.id] = ($event.target as HTMLInputElement).value
@@ -203,15 +202,13 @@ onBeforeUnmount(() => {
             </td>
             <td :class="statusTone(row.change)">
               <span
-                class="profit-amount"
-                aria-label="当前股价"
+                class="profit-amount current-price"
                 :title="row.price ?? '—'"
                 >{{ row.price ?? "—" }}</span
               >
               <small
-                class="return-rate"
+                class="return-rate price-change"
                 :class="statusTone(row.change)"
-                aria-label="涨跌幅"
                 >{{ signed(row.change) }}</small
               >
             </td>
@@ -223,10 +220,9 @@ onBeforeUnmount(() => {
                 >{{ signed(row.profit, true) }}</span
               >
               <small
-                class="return-rate"
+                class="return-rate daily-return"
                 :class="statusTone(row.dailyPercent)"
                 :title="signed(row.dailyPercent)"
-                aria-label="当日收益率"
                 >{{ signed(row.dailyPercent) }}</small
               >
             </td>
@@ -238,10 +234,9 @@ onBeforeUnmount(() => {
                 >{{ signed(row.holdingProfit, true) }}</span
               >
               <small
-                class="return-rate"
+                class="return-rate holding-return"
                 :class="statusTone(row.holdingPercent)"
                 :title="signed(row.holdingPercent)"
-                aria-label="持仓收益率"
                 >{{ signed(row.holdingPercent) }}</small
               >
             </td>
@@ -253,7 +248,7 @@ onBeforeUnmount(() => {
       </p>
       <p v-if="!snapshot && !error" class="panel-empty">正在获取持仓…</p>
     </div>
-    <section v-if="snapshot" class="panel-total" aria-label="当日汇总">
+    <section v-if="snapshot" class="panel-total">
       <div>
         <strong>今日合计</strong
         ><small

@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
       ><button class="subtle" @click="tab = 'backup'">备份账户</button>
       <button class="primary" @click="modal = 'cash'">＋ 资金流水</button>
     </header>
-    <section class="account-strip" aria-label="账户账面概况">
+    <section class="account-strip">
       <div>
         <span>账面总资产</span><strong>{{ money(valuation.total) }}</strong
         ><small v-if="valuation.missing"
@@ -603,11 +603,10 @@ onBeforeUnmount(() => {
       v-if="error || message"
       class="notice"
       :class="{ danger: !!error }"
-      role="status"
     >
       <span>{{ error || message }}</span
       ><button
-        aria-label="关闭提示"
+        class="notice-close"
         @click="
           error = '';
           message = '';
@@ -631,14 +630,13 @@ onBeforeUnmount(() => {
           <h2>自选 / 持仓</h2>
           <button
             class="icon-button"
-            aria-label="添加证券"
+            title="添加证券"
             @click="modal = 'security'"
           >
             ＋
           </button>
         </div>
         <label class="search"
-          ><span class="sr-only">搜索自选</span
           ><input v-model="query" placeholder="搜索名称 / 代码"
         /></label>
         <div class="watch-head">
@@ -772,7 +770,7 @@ onBeforeUnmount(() => {
             >发生时间<DateTimeField
               v-model="tradeTime"
               mode="datetime"
-              aria-label="成交发生时间"
+              test-id="trade-time"
           /></label>
           <div class="form-grid compact">
             <label
@@ -901,7 +899,7 @@ onBeforeUnmount(() => {
       </aside>
     </div>
     <section class="details panel">
-      <nav class="details-tabs" aria-label="账户明细">
+      <nav class="details-tabs">
         <button
           v-for="t in [
             { id: 'holdings', label: '我的持仓' },
@@ -1354,25 +1352,9 @@ onBeforeUnmount(() => {
     >
       <section
         class="modal"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="
-          modal === 'history'
-            ? historyTarget?.action === 'delete'
-              ? '删除历史记录'
-              : '修改历史记录'
-            : modal === 'cash'
-              ? '录入资金流水'
-              : modal === 'security'
-                ? '添加证券'
-                : modal === 'opening'
-                  ? '录入期初持仓'
-                  : '恢复账户备份'
-        "
       >
         <button
           class="modal-close"
-          aria-label="关闭对话框"
           :disabled="saving"
           @click="modal = ''"
         >
@@ -1402,7 +1384,7 @@ onBeforeUnmount(() => {
             >发生时间<DateTimeField
               v-model="cashForm.time"
               mode="datetime"
-              aria-label="资金流水发生时间"
+              test-id="cash-entry-time"
           /></label>
           <label
             >金额 · 元（填正数）<input
@@ -1486,7 +1468,7 @@ onBeforeUnmount(() => {
             >期初日期<DateTimeField
               v-model="opening.time"
               mode="datetime"
-              aria-label="期初持仓日期时间"
+              test-id="opening-time"
           /></label>
           <label
             >期初股数 / 份数（整数）<input
@@ -1524,7 +1506,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <p v-if="error" class="dialog-error" role="alert">{{ error }}</p>
+        <p v-if="error" class="dialog-error">{{ error }}</p>
       </section>
     </div>
   </main>

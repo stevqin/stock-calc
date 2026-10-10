@@ -69,24 +69,31 @@ async function start(props = {}) {
   });
   await flushPromises();
 }
-const input = (name: string) => wrapper.find(`input[aria-label="${name}"]`);
+const field = (name: string) =>
+  wrapper
+    .findAll(".step-field")
+    .find((item) => item.find(".step-label").text().includes(name))!;
+const input = (name: string) => field(name).find("input");
 const value = (name: string) => (input(name).element as HTMLInputElement).value;
+const plannerTab = (name: string) =>
+  wrapper.findAll(".planner-mode-tabs button").find((item) => item.text() === name)!;
 it("正算与反推通过页签切换，同一时间只显示一套输入和结果", async () => {
   await start();
-  const tabs = wrapper.findAll('[role="tab"]');
+  const tabs = wrapper.findAll(".planner-mode-tabs button");
   expect(tabs.map((tab) => tab.text())).toEqual(["正算", "反推"]);
-  expect(tabs[0].attributes("aria-selected")).toBe("true");
+  expect(tabs[0].classes()).toContain("active");
   expect(wrapper.findAll(".planner-card")).toHaveLength(1);
   expect(
     wrapper
       .find(".planner-forward")
-      .find('input[aria-label="买入价"]')
+      .findAll(".step-field")[0]
+      .find("input")
       .exists(),
   ).toBe(true);
   expect(
     wrapper
       .find(".planner-forward")
-      .find('input[aria-label="目标配对净利润"]')
+      .find(".planner-reverse")
       .exists(),
   ).toBe(false);
   expect(wrapper.find(".planner-reverse").exists()).toBe(false);
@@ -95,7 +102,7 @@ it("正算与反推通过页签切换，同一时间只显示一套输入和结�
   expect(wrapper.find(".planner-forward").text()).toContain("交易后持仓成本");
   expect(wrapper.find(".planner-forward").text()).toContain("交易后持仓市值");
   await tabs[1].trigger("click");
-  expect(tabs[1].attributes("aria-selected")).toBe("true");
+  expect(tabs[1].classes()).toContain("active");
   expect(wrapper.findAll(".planner-card")).toHaveLength(1);
   expect(wrapper.find(".planner-forward").exists()).toBe(false);
   expect(input("反推固定价").exists()).toBe(true);
@@ -106,20 +113,14 @@ it("正算与反推通过页签切换，同一时间只显示一套输入和结�
 });
 it("反推有独立价格和数量，正算输入不会被反推修改", async () => {
   await start();
-  await wrapper
-    .get('[role="tab"][aria-controls="planner-panel-reverse"]')
-    .trigger("click");
+  await plannerTab("反推").trigger("click");
   expect(value("反推固定价")).toBe("10.000");
   await input("反推固定价").setValue("9.500");
   await input("反推买入数量").setValue("200");
-  await wrapper
-    .get('[role="tab"][aria-controls="planner-panel-forward"]')
-    .trigger("click");
+  await plannerTab("正算").trigger("click");
   expect(value("买入价")).toBe("10.000");
   expect(value("买入数量")).toBe("100");
-  await wrapper
-    .get('[role="tab"][aria-controls="planner-panel-reverse"]')
-    .trigger("click");
+  await plannerTab("反推").trigger("click");
   expect(value("反推固定价")).toBe("9.500");
   expect(value("反推买入数量")).toBe("200");
   expect(wrapper.find(".planner-reverse").text()).toContain("最低卖价");
@@ -140,28 +141,21 @@ it("每3秒跟随最新价，单边手动修改/清空后锁定，恢复后继�
   await input("买入价").setValue("");
   await vi.advanceTimersByTimeAsync(3000);
   expect(value("买入价")).toBe("");
-  await wrapper
-    .findAll("button")
-    .find((b) => b.attributes("aria-label") === "买入价跟随行情")!
-    .trigger("click");
+  await field("买入价").find(".resume-price").trigger("click");
   expect(value("买入价")).toBe("10.200");
 });
 it("价格加减锁定，ETF按0.001档，数量按100加减，金额按10加减", async () => {
   await start();
-  await wrapper.find('[aria-label="买入价增加0.001"]').trigger("click");
+  await field("买入价").find(".step-increase").trigger("click");
   expect(value("买入价")).toBe("10.001");
-  await wrapper.find('[aria-label="买入数量增加100"]').trigger("click");
+  await field("买入数量").find(".step-increase").trigger("click");
   expect(value("买入数量")).toBe("200");
-  await wrapper.find('[aria-label="卖出数量设为500"]').trigger("click");
+  await field("卖出数量").get('[data-quantity="500"]').trigger("click");
   expect(value("卖出数量")).toBe("500");
-  await wrapper
-    .get('[role="tab"][aria-controls="planner-panel-reverse"]')
-    .trigger("click");
-  await wrapper.find('[aria-label="目标配对净利润增加10"]').trigger("click");
+  await plannerTab("反推").trigger("click");
+  await field("目标配对净利润").find(".step-increase").trigger("click");
   expect(value("目标配对净利润")).toBe("20.00");
-  await wrapper
-    .get('[role="tab"][aria-controls="planner-panel-forward"]')
-    .trigger("click");
+  await plannerTab("正算").trigger("click");
   marketQuotes.sh510300.latest = "11";
   await vi.advanceTimersByTimeAsync(3000);
   expect(value("买入价")).toBe("10.001");
@@ -349,11 +343,11 @@ it("突出扣费做T收益，并分别显示交易后成本和按现价估算的
   await input("买入价").setValue("9");
   await input("卖出价").setValue("11");
   expect(wrapper.get(".plan-net-profit").text()).toContain("199.80");
-  expect(wrapper.get('[aria-label="买入金额"]').text()).toContain("900.09");
-  expect(wrapper.get('[aria-label="卖出金额"]').text()).toContain("1,100.11");
+  expect(wrapper.get(".buy-amount").text()).toContain("900.09");
+  expect(wrapper.get(".sell-amount").text()).toContain("1,100.11");
   await input("卖出数量").setValue("200");
-  expect(wrapper.get('[aria-label="卖出金额"]').text()).toContain("2,200.22");
-  expect(wrapper.get('[aria-label="买入金额"]').text()).toContain("900.09");
+  expect(wrapper.get(".sell-amount").text()).toContain("2,200.22");
+  expect(wrapper.get(".buy-amount").text()).toContain("900.09");
   await input("卖出数量").setValue("100");
   expect(wrapper.get(".plan-holding-cost").text()).toContain("10.0000");
   expect(wrapper.get(".plan-holding-cost").text()).toContain("9.8002");
@@ -377,8 +371,7 @@ it("买卖价格旁分别显示相对行情昨收的涨跌幅", async () => {
 it("快捷股数按各自价格折算，点击和行情刷新都不重置已填数量", async () => {
   await start();
   await input("买入价").setValue("3.4");
-  const buyButtons = () =>
-    wrapper.findAll('button[aria-label^="买入数量设为"]');
+  const buyButtons = () => field("买入数量").findAll(".quantity-shortcut");
   expect(buyButtons().map((b) => b.text())).toEqual([
     "100",
     "1400",
@@ -389,13 +382,13 @@ it("快捷股数按各自价格折算，点击和行情刷新都不重置已填�
     "23500",
     "29400",
   ]);
-  await wrapper.get('[aria-label="买入数量设为14700"]').trigger("click");
+  await field("买入数量").get('[data-quantity="14700"]').trigger("click");
   expect(value("买入数量")).toBe("14700");
   marketQuotes.sh510300.latest = "5";
   await vi.advanceTimersByTimeAsync(3000);
   expect(value("买入数量")).toBe("14700");
-  expect(wrapper.find('[aria-label="卖出数量设为20000"]').exists()).toBe(true);
-  expect(wrapper.find('[aria-label="卖出数量设为1000"]').exists()).toBe(true);
+  expect(field("卖出数量").find('[data-quantity="20000"]').exists()).toBe(true);
+  expect(field("卖出数量").find('[data-quantity="1000"]').exists()).toBe(true);
   await input("买入价").setValue("1500");
   expect(buyButtons().map((b) => b.text())).toEqual(["100"]);
   expect(value("买入数量")).toBe("14700");
@@ -438,7 +431,7 @@ it("每次打开交易录入使用打开时刻，自动恢复草稿不恢复旧�
       : undefined,
   );
   await start({ action: "record", initialTab: "trades" });
-  const time = () => wrapper.get('[aria-label="成交发生时间"]');
+  const time = () => wrapper.get('[data-testid="trade-time"] input');
   expect((time().element as HTMLInputElement).value).toContain(
     "2026-09-15 12:30",
   );

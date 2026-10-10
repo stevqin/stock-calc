@@ -457,7 +457,7 @@ const chart = computed(() => {
 </script>
 
 <template>
-  <section class="pnl-analysis" aria-label="盈亏分析">
+  <section class="pnl-analysis">
     <header class="pnl-heading">
       <div>
         <h2>盈亏分析</h2>
@@ -466,7 +466,7 @@ const chart = computed(() => {
       <span class="pnl-data-origin">账本起点 {{ firstDate }} · 金额 / 元</span>
     </header>
     <div class="pnl-range-toolbar">
-      <div class="pnl-segments" aria-label="分析时间范围">
+      <div class="pnl-segments">
         <button
           v-for="p in [
             { id: '1m', label: '最近一月' },
@@ -477,7 +477,6 @@ const chart = computed(() => {
           ]"
           :key="p.id"
           :class="{ active: preset === p.id }"
-          :aria-pressed="preset === p.id"
           @click="preset = p.id"
         >
           {{ p.label }}
@@ -487,13 +486,13 @@ const chart = computed(() => {
         <DateTimeField
           v-model="customStart"
           mode="date"
-          aria-label="分析开始日期"
+          test-id="analysis-start-date"
           :max="customEnd"
         /><span>至</span
         ><DateTimeField
           v-model="customEnd"
           mode="date"
-          aria-label="分析结束日期"
+          test-id="analysis-end-date"
           :min="customStart"
           :max="today"
         />
@@ -502,13 +501,13 @@ const chart = computed(() => {
         >{{ range.start }} — {{ range.end }}</span
       >
     </div>
-    <p v-if="!validRange" role="alert" class="pnl-warning">
+    <p v-if="!validRange" class="pnl-warning">
       请选择有效的起止日期，结束日期不能晚于今天。
     </p>
     <p v-if="!hasRecords" class="pnl-empty">
       还没有账本记录。录入交易或资金流水后，即可查看收益分析。
     </p>
-    <div v-if="loading" class="pnl-loading" role="status">
+    <div v-if="loading" class="pnl-loading">
       正在补充历史行情，已有数据可继续查看…
     </div>
     <details v-if="errors.length" class="pnl-warning">
@@ -529,7 +528,7 @@ const chart = computed(() => {
           }}</strong
           ><span class="pnl-total-return" :title="summary.rateReason"
             >证券盈亏率
-            <b aria-label="区间盈亏率" :class="tone(summary.returnRate)">{{
+            <b class="range-return" :class="tone(summary.returnRate)">{{
               percent(summary.returnRate)
             }}</b></span
           ><small>含持仓涨跌及利息等收入，已扣交易费用</small>
@@ -614,8 +613,6 @@ const chart = computed(() => {
             v-if="chart.points.length && hasRecords"
             class="pnl-trend"
             viewBox="0 0 720 204"
-            role="img"
-            aria-label="所选时间范围的累计盈亏曲线"
           >
             <line
               x1="52"
@@ -702,7 +699,7 @@ const chart = computed(() => {
           </p>
         </div>
         <div class="pnl-calendar-controls">
-          <div class="pnl-segments" aria-label="收益日历视图">
+          <div class="pnl-segments">
             <button
               v-for="v in [
                 { id: 'all', label: '全部' },
@@ -710,7 +707,6 @@ const chart = computed(() => {
                 { id: 'month', label: '月' },
               ] as const"
               :key="v.id"
-              :aria-pressed="calendarView === v.id"
               :class="{ active: calendarView === v.id }"
               @click="calendarView = v.id"
             >
@@ -720,7 +716,7 @@ const chart = computed(() => {
           <select
             v-if="calendarView === 'year'"
             v-model="selectedYear"
-            aria-label="选择年份"
+            class="pnl-year-select"
           >
             <option v-for="year in years" :key="year" :value="year">
               {{ year }}年
@@ -729,7 +725,7 @@ const chart = computed(() => {
             v-if="calendarView === 'month'"
             v-model="selectedMonth"
             mode="month"
-            aria-label="选择月份"
+            test-id="analysis-month"
             :max="currentMonth"
           />
         </div>
@@ -763,7 +759,7 @@ const chart = computed(() => {
         </button>
       </div>
       <div v-else class="pnl-months">
-        <div class="pnl-month-grid" aria-label="最近十二个月收益日历">
+        <div class="pnl-month-grid">
           <article
             v-for="month in monthCalendars"
             :key="month.month"
@@ -812,7 +808,6 @@ const chart = computed(() => {
                 :disabled="
                   cell.date > today || cell.date < firstDate || !hasRecords
                 "
-                :aria-label="`${cell.date} ${cell.status || money(cell.day?.profit, true) + '元'}，证券盈亏率 ${percent(cell.day?.returnRate)}，查看详情`"
                 :title="
                   cell.day?.reasons.join('；') ||
                   cell.day?.rateReason ||
@@ -846,14 +841,13 @@ const chart = computed(() => {
       v-if="selectedDay"
       ref="dayDetail"
       class="pnl-panel pnl-day-detail"
-      aria-labelledby="pnl-day-title"
       @cancel.prevent="closeDay"
       @click.self="closeDay"
     >
       <div class="pnl-day-dialog-content">
         <header>
           <h3 id="pnl-day-title">{{ selectedDay }} · 收益明细</h3>
-          <button autofocus aria-label="关闭收益明细" @click="closeDay">
+          <button autofocus class="pnl-day-close" @click="closeDay">
             关闭
           </button>
         </header>
@@ -865,7 +859,7 @@ const chart = computed(() => {
             }}</b></span
           ><span :title="detail?.rateReason"
             >证券盈亏率
-            <b aria-label="当日盈亏率" :class="tone(detail?.returnRate)">{{
+            <b class="day-return" :class="tone(detail?.returnRate)">{{
               percent(detail?.returnRate)
             }}</b></span
           ><span>手续费 {{ money(detail?.fees) }}</span

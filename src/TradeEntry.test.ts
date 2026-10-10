@@ -65,13 +65,13 @@ async function start() {
     global: { stubs: { MarketChart: true } },
   });
   await flushPromises();
-  await wrapper.find('[aria-label="成交价"]').setValue("10");
+  await wrapper.find('[data-testid="trade-price"]').setValue("10");
   await setTradeTime(time);
 }
 async function setTradeTime(value: string) {
   const field = wrapper
     .findAllComponents(DateTimeField)
-    .find((item) => item.props("ariaLabel") === "成交发生时间");
+    .find((item) => item.props("testId") === "trade-time");
   if (!field) throw new Error("找不到成交发生时间控件");
   field.vm.$emit("update:modelValue", value);
   await wrapper.vm.$nextTick();
@@ -91,7 +91,7 @@ describe("先输入再选择买卖", () => {
     expect(
       wrapper.get('[data-direction="sell"] .trade-fees-preview').text(),
     ).toContain("5.51");
-    await wrapper.get('[aria-label="成交股数"]').setValue("1100");
+    await wrapper.get('[data-testid="trade-quantity"]').setValue("1100");
     expect(
       wrapper.get(".submit-order.sell").attributes("disabled"),
     ).toBeDefined();
@@ -113,9 +113,9 @@ describe("先输入再选择买卖", () => {
       global: { stubs: { MarketChart: true } },
     });
     expect(wrapper.find(".startup").exists()).toBe(false);
-    expect(wrapper.find('[aria-label="成交价"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="trade-price"]').exists()).toBe(true);
     await flushPromises();
-    await wrapper.get('[aria-label="成交价"]').setValue("10");
+    await wrapper.get('[data-testid="trade-price"]').setValue("10");
     await setTradeTime(time);
     expect(
       wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
@@ -128,11 +128,11 @@ describe("先输入再选择买卖", () => {
   it("紧凑布局只有一个成交时间输入，切换费用口径不清空交易字段或实际费用", async () => {
     await start();
     const originalTime = (
-      wrapper.find('[aria-label="成交发生时间"]').element as HTMLInputElement
+      wrapper.find('[data-testid="trade-time"] input').element as HTMLInputElement
     ).value;
-    expect(wrapper.findAll('[aria-label="成交发生时间"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-testid="trade-time"]')).toHaveLength(1);
     expect(
-      wrapper.find('.trade-main-fields [aria-label="成交发生时间"]').exists(),
+      wrapper.find('.trade-main-fields [data-testid="trade-time"]').exists(),
     ).toBe(true);
     await wrapper.find(".trade-fee-fields select").setValue("actual");
     await wrapper.find(".actual-fees input").setValue("1.25");
@@ -143,10 +143,10 @@ describe("先输入再选择买卖", () => {
       (wrapper.find(".actual-fees input").element as HTMLInputElement).value,
     ).toBe("1.25");
     expect(
-      (wrapper.find('[aria-label="成交价"]').element as HTMLInputElement).value,
+      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement).value,
     ).toBe("10");
     expect(
-      (wrapper.find('[aria-label="成交发生时间"]').element as HTMLInputElement)
+      (wrapper.find('[data-testid="trade-time"] input').element as HTMLInputElement)
         .value,
     ).toBe(originalTime);
     expect(saveAccount).not.toHaveBeenCalled();
@@ -155,7 +155,7 @@ describe("先输入再选择买卖", () => {
     await start();
     expect(wrapper.text()).not.toContain("只记账，不下单");
     expect(wrapper.find(".ticket .section-heading").exists()).toBe(false);
-    expect(wrapper.find('[aria-label="成交价"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="trade-price"]').exists()).toBe(true);
   });
   it("按交割单费用保存卖出，未确认费率也不会改成估算", async () => {
     account.feeConfirmed.stock = false;
@@ -180,10 +180,10 @@ describe("先输入再选择买卖", () => {
     expect(close.text()).toBe("清仓（全部可卖）");
     await close.trigger("click");
     expect(
-      (wrapper.get('[aria-label="成交股数"]').element as HTMLInputElement)
+      (wrapper.get('[data-testid="trade-quantity"]').element as HTMLInputElement)
         .value,
     ).toBe("1000");
-    await wrapper.get('[aria-label="成交价"]').setValue("11");
+    await wrapper.get('[data-testid="trade-price"]').setValue("11");
     expect(
       wrapper.get('[data-direction="sell"] .trade-cost-preview').text(),
     ).toContain("10.0000 → 已清仓");
@@ -196,13 +196,13 @@ describe("先输入再选择买卖", () => {
       wrapper.get(`[data-direction="${side}"] .trade-cost-preview`);
     expect(cost("buy").text()).toContain("10.0000 → 10.0046");
     expect(cost("sell").text()).toContain("10.0000 → 10.0061");
-    await wrapper.get('[aria-label="成交价"]').setValue("11");
+    await wrapper.get('[data-testid="trade-price"]').setValue("11");
     expect(cost("buy").text()).toContain("10.0955");
     expect(cost("sell").text()).toContain("9.8951");
     await wrapper.get(".quantity-shortcuts .close-position").trigger("click");
     expect(cost("sell").text()).toContain("已清仓");
     expect(cost("sell").text()).not.toContain("NaN");
-    await wrapper.get('[aria-label="成交股数"]').setValue("0");
+    await wrapper.get('[data-testid="trade-quantity"]').setValue("0");
     expect(cost("buy").text()).toContain("—");
     expect(cost("sell").text()).toContain("—");
   });
@@ -242,17 +242,17 @@ describe("先输入再选择买卖", () => {
       limitDown: "9.00",
     };
     await start();
-    const price = wrapper.get('[aria-label="成交价"]');
+    const price = wrapper.get('[data-testid="trade-price"]');
     expect(price.attributes("min")).toBe("9.00");
     expect(price.attributes("max")).toBe("11.00");
-    await wrapper.get('[aria-label="成交价增加0.01"]').trigger("click");
+    await wrapper.get(".trade-price-increase").trigger("click");
     expect((price.element as HTMLInputElement).value).toBe("10.01");
     expect(wrapper.text()).toContain("手动价格");
     await price.setValue("11");
-    await wrapper.get('[aria-label="成交价增加0.01"]').trigger("click");
+    await wrapper.get(".trade-price-increase").trigger("click");
     expect((price.element as HTMLInputElement).value).toBe("11.00");
     await price.setValue("9");
-    await wrapper.get('[aria-label="成交价减少0.01"]').trigger("click");
+    await wrapper.get(".trade-price-decrease").trigger("click");
     expect((price.element as HTMLInputElement).value).toBe("9.00");
     await price.setValue("11.01");
     expect(
@@ -262,17 +262,17 @@ describe("先输入再选择买卖", () => {
       wrapper.get(".submit-order.sell").attributes("disabled"),
     ).toBeDefined();
     await price.setValue("10");
-    await wrapper.get('[aria-label="成交股数增加100"]').trigger("click");
+    await wrapper.get(".trade-quantity-increase").trigger("click");
     expect(
-      (wrapper.get('[aria-label="成交股数"]').element as HTMLInputElement)
+      (wrapper.get('[data-testid="trade-quantity"]').element as HTMLInputElement)
         .value,
     ).toBe("200");
     expect(
       wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
     ).toContain("10.0042");
-    await wrapper.get('[aria-label="成交股数减少100"]').trigger("click");
+    await wrapper.get(".trade-quantity-decrease").trigger("click");
     expect(
-      (wrapper.get('[aria-label="成交股数"]').element as HTMLInputElement)
+      (wrapper.get('[data-testid="trade-quantity"]').element as HTMLInputElement)
         .value,
     ).toBe("100");
     await setTradeTime("2026-08-27T10:00:00");
@@ -288,10 +288,10 @@ describe("先输入再选择买卖", () => {
     );
     await start();
     expect(
-      (wrapper.find('[aria-label="成交股数"]').element as HTMLInputElement)
+      (wrapper.find('[data-testid="trade-quantity"]').element as HTMLInputElement)
         .value,
     ).toBe("200");
-    await wrapper.find('[aria-label="成交价"]').setValue("11");
+    await wrapper.find('[data-testid="trade-price"]').setValue("11");
     await flushPromises();
     const payload = vi.mocked(writeDraft).mock.calls.at(-1)?.[1] as Record<
       string,
@@ -314,7 +314,7 @@ describe("先输入再选择买卖", () => {
       wrapper.find(".trade-fields").attributes("disabled"),
     ).toBeUndefined();
     expect(
-      (wrapper.find('[aria-label="成交价"]').element as HTMLInputElement).value,
+      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement).value,
     ).toBe("10");
     await wrapper.find(".submit-order.sell").trigger("click");
     await flushPromises();
@@ -349,7 +349,7 @@ describe("先输入再选择买卖", () => {
     expect(
       wrapper.find(".submit-order.buy").attributes("disabled"),
     ).toBeUndefined();
-    await wrapper.find('[aria-label="成交股数"]').setValue("0");
+    await wrapper.find('[data-testid="trade-quantity"]').setValue("0");
     expect(
       wrapper.find(".submit-order.buy").attributes("disabled"),
     ).toBeDefined();
@@ -423,7 +423,7 @@ describe("先输入再选择买卖", () => {
     expect(wrapper.findAll(".legacy-trade-drafts button")).toHaveLength(2);
     await wrapper.findAll(".legacy-trade-drafts button")[1].trigger("click");
     expect(
-      (wrapper.find('[aria-label="成交价"]').element as HTMLInputElement).value,
+      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement).value,
     ).toBe("11");
     await wrapper.find(".submit-order.buy").trigger("click");
     await flushPromises();
@@ -450,11 +450,11 @@ it("成交价旁使用当前行情昨收计算涨跌幅", async () => {
     fetchedAt: "2026-08-28T07:00:00Z",
   };
   await start();
-  await wrapper.get('[aria-label="成交价"]').setValue("11");
+  await wrapper.get('[data-testid="trade-price"]').setValue("11");
   expect(
     wrapper.get('label[for="trade-entry-price"] .price-change').text(),
   ).toBe("较昨收 +10.00%");
-  await wrapper.get('[aria-label="成交价"]').setValue("9");
+  await wrapper.get('[data-testid="trade-price"]').setValue("9");
   expect(
     wrapper.get('label[for="trade-entry-price"] .price-change').text(),
   ).toBe("较昨收 -10.00%");

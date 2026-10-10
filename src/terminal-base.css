@@ -879,13 +879,6 @@ td b {
   font-size: 40px;
   margin-bottom: 25px;
 }
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-}
 @media (min-width: 1450px) {
   .terminal {
     max-width: 1800px;

@@ -1177,7 +1177,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
       ><button class="subtle" @click="tab = 'backup'">备份账户</button>
       <button class="primary" @click="modal = 'cash'">＋ 资金流水</button>
     </header>
-    <section v-if="!embedded" class="account-strip" aria-label="账户账面概况">
+    <section v-if="!embedded" class="account-strip">
       <div>
         <span>账面总资产</span><strong>{{ money(valuation.total) }}</strong
         ><small v-if="valuation.missing"
@@ -1233,14 +1233,13 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           <h2>自选 / 持仓</h2>
           <button
             class="icon-button"
-            aria-label="添加证券"
+            title="添加证券"
             @click="modal = 'security'"
           >
             ＋
           </button>
         </div>
         <label class="search"
-          ><span class="sr-only">搜索自选</span
           ><input v-model="query" placeholder="搜索名称 / 代码"
         /></label>
         <div class="watch-head">
@@ -1388,7 +1387,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 <div class="step-control">
                   <button
                     type="button"
-                    :aria-label="`成交价减少${priceTick}`"
+                    class="trade-price-decrease"
                     @click="stepTradeInput('price', -1)"
                   >
                     −
@@ -1397,10 +1396,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                     id="trade-entry-price"
                     ref="orderPriceInput"
                     v-model="orderPrice"
+                    data-testid="trade-price"
                     @input="tradePriceLocked = true"
                     @keydown.up.prevent="stepTradeInput('price', 1)"
                     @keydown.down.prevent="stepTradeInput('price', -1)"
-                    aria-label="成交价"
                     inputmode="decimal"
                     :min="tradePriceLimits?.min ?? priceTick"
                     :max="tradePriceLimits?.max ?? '1000000'"
@@ -1409,7 +1408,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   />
                   <button
                     type="button"
-                    :aria-label="`成交价增加${priceTick}`"
+                    class="trade-price-increase"
                     @click="stepTradeInput('price', 1)"
                   >
                     ＋
@@ -1423,7 +1422,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 <div class="step-control">
                   <button
                     type="button"
-                    aria-label="成交股数减少100"
+                    class="trade-quantity-decrease"
                     @click="stepTradeInput('quantity', -1)"
                   >
                     −
@@ -1431,14 +1430,14 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   <input
                     id="trade-entry-quantity"
                     v-model="orderQty"
-                    aria-label="成交股数"
+                    data-testid="trade-quantity"
                     inputmode="numeric"
                     @keydown.up.prevent="stepTradeInput('quantity', 1)"
                     @keydown.down.prevent="stepTradeInput('quantity', -1)"
                   />
                   <button
                     type="button"
-                    aria-label="成交股数增加100"
+                    class="trade-quantity-increase"
                     @click="stepTradeInput('quantity', 1)"
                   >
                     ＋
@@ -1449,7 +1448,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 >发生时间<DateTimeField
                   v-model="tradeTime"
                   mode="datetime"
-                  aria-label="成交发生时间"
+                  test-id="trade-time"
               /></label>
             </div>
             <p class="trade-price-limits">
@@ -1605,7 +1604,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                         ? money(tradePriorHolding.dilutedCost, 4)
                         : "无持仓"
                     }}</span>
-                    <span aria-hidden="true"> → </span>
+                    <span> → </span>
                     <span>{{
                       orderPreviews[direction].holding?.quantity === "0"
                         ? "已清仓"
@@ -1668,7 +1667,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
       </aside>
     </div>
     <section v-if="!embedded || !action" class="details panel">
-      <nav class="details-tabs" aria-label="账户明细">
+      <nav class="details-tabs">
         <button
           v-for="t in [
             { id: 'holdings', label: '我的持仓' },
@@ -1844,21 +1843,17 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
         </div>
       </div>
       <div v-else-if="tab === 'trades'" class="table-scroll ledger-tab-layout">
-        <nav
-          v-if="!historyReadOnly"
-          class="history-mode-tabs"
-          aria-label="历史成交查看方式"
-        >
+        <nav v-if="!historyReadOnly" class="history-mode-tabs">
           <button
             type="button"
-            :aria-current="historyMode === 'records' ? 'page' : undefined"
+            :class="{ active: historyMode === 'records' }"
             @click="setHistoryMode('records')"
           >
             成交记录
           </button>
           <button
             type="button"
-            :aria-current="historyMode === 'reconcile' ? 'page' : undefined"
+            :class="{ active: historyMode === 'reconcile' }"
             @click="setHistoryMode('reconcile')"
           >
             对账时间线
@@ -1885,22 +1880,22 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             @select="filterHistory"
             @clear="historyFilterId = ''"
           />
-          <div class="history-date-range" role="group" aria-label="日期范围">
+          <div class="history-date-range">
             <span class="history-date-caption">日期</span>
             <DateTimeField
               v-model="historyStart"
               mode="date"
-              aria-label="开始日期"
+              test-id="history-start-date"
               placeholder="开始日期"
               compact
               title="留空表示不限开始日期"
               :invalid="historyBounds.invalid"
             />
-            <span class="history-date-separator" aria-hidden="true">—</span>
+            <span class="history-date-separator">—</span>
             <DateTimeField
               v-model="historyEnd"
               mode="date"
-              aria-label="结束日期"
+              test-id="history-end-date"
               placeholder="结束日期"
               compact
               title="包含所选日期；留空表示不限结束日期"
@@ -1921,17 +1916,12 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             </button>
           </div>
         </div>
-        <p
-          v-if="historyBounds.invalid"
-          class="history-range-error"
-          role="alert"
-        >
+        <p v-if="historyBounds.invalid" class="history-range-error">
           开始日期时间不能晚于结束日期时间，请调整筛选范围。
         </p>
         <section
           v-if="historyMode === 'reconcile' && !historyReadOnly"
           class="reconcile-summary"
-          aria-label="历史资金对账摘要"
         >
           <div>
             <span>负余额区间</span>
@@ -2168,9 +2158,6 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   <button
                     type="button"
                     class="text-button"
-                    :aria-label="
-                      '修改' + (row.scope === 'trade' ? '成交' : '资金流水')
-                    "
                     :disabled="saving"
                     @click="openHistory(row.scope, row.id, 'edit')"
                   >
@@ -2205,13 +2192,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
         </div>
       </div>
       <div v-else-if="tab === 'planner' && security" class="planner">
-        <nav class="planner-mode-tabs" aria-label="测算方式" role="tablist">
+        <nav class="planner-mode-tabs">
           <button
             id="planner-tab-forward"
             type="button"
-            role="tab"
-            :aria-selected="plannerMode === 'forward'"
-            aria-controls="planner-panel-forward"
             :class="{ active: plannerMode === 'forward' }"
             @click="plannerMode = 'forward'"
           >
@@ -2220,9 +2204,6 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           <button
             id="planner-tab-reverse"
             type="button"
-            role="tab"
-            :aria-selected="plannerMode === 'reverse'"
-            aria-controls="planner-panel-reverse"
             :class="{ active: plannerMode === 'reverse' }"
             @click="plannerMode = 'reverse'"
           >
@@ -2233,8 +2214,6 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           v-if="plannerMode === 'forward'"
           id="planner-panel-forward"
           class="planner-card planner-forward"
-          role="tabpanel"
-          aria-labelledby="planner-tab-forward"
         >
           <header>
             <h3>正算</h3>
@@ -2266,7 +2245,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   }}</span
                   ><button
                     v-if="priceLocked.buyPrice"
-                    aria-label="买入价跟随行情"
+                    class="resume-price"
                     @click="resumePrice('buyPrice')"
                   >
                     跟随行情
@@ -2285,7 +2264,8 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   <button
                     v-for="n in quantityShortcuts(plan.buyPrice)"
                     :key="n"
-                    :aria-label="`买入数量设为${n}`"
+                    class="quantity-shortcut"
+                    :data-quantity="n"
                     :class="{ chosen: plan.buyQty === n }"
                     @click="plan.buyQty = n"
                   >
@@ -2317,7 +2297,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   }}</span
                   ><button
                     v-if="priceLocked.sellPrice"
-                    aria-label="卖出价跟随行情"
+                    class="resume-price"
                     @click="resumePrice('sellPrice')"
                   >
                     跟随行情
@@ -2336,7 +2316,8 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   <button
                     v-for="n in quantityShortcuts(plan.sellPrice)"
                     :key="n"
-                    :aria-label="`卖出数量设为${n}`"
+                    class="quantity-shortcut"
+                    :data-quantity="n"
                     :class="{ chosen: plan.sellQty === n }"
                     @click="plan.sellQty = n"
                   >
@@ -2348,13 +2329,13 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           </div>
           <div v-if="forwardResult.result" class="planner-results">
             <div class="plan-holding-overview">
-              <section class="plan-trade-amount" aria-label="买入金额">
+              <section class="plan-trade-amount buy-amount">
                 <span class="plan-result-label"
                   >买入金额 <small>元</small></span
                 >
                 <strong>{{ money(forwardResult.result.buy.cash) }}</strong>
               </section>
-              <section class="plan-trade-amount" aria-label="卖出金额">
+              <section class="plan-trade-amount sell-amount">
                 <span class="plan-result-label"
                   >卖出金额 <small>元</small></span
                 >
@@ -2367,7 +2348,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 }}</strong>
               </section>
             </div>
-            <section class="plan-net-profit" aria-label="本次做T净收益">
+            <section class="plan-net-profit">
               <div class="plan-result-label">
                 本次做T净收益 <span>已扣费用</span>
               </div>
@@ -2383,12 +2364,11 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 >
               </p>
             </section>
-            <section class="plan-holding-pnl" aria-label="交易后持仓盈亏">
+            <section class="plan-holding-pnl">
               <div class="plan-result-label">交易后持仓盈亏</div>
               <div class="plan-pnl-values">
                 <strong
                   :class="tone(forwardResult.holding?.profit)"
-                  aria-label="交易后持仓盈亏金额"
                 >
                   {{ money(forwardResult.holding?.profit)
                   }}<small v-if="forwardResult.holding?.profit != null"
@@ -2398,7 +2378,6 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 <span
                   class="plan-holding-pnl-rate"
                   :class="tone(forwardResult.holding?.profitPercent)"
-                  aria-label="交易后持仓盈亏率"
                 >
                   <small>盈亏率</small
                   >{{ percent(forwardResult.holding?.profitPercent) }}
@@ -2407,7 +2386,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               <p>按参考现价估算 · 本轮持仓</p>
             </section>
             <div class="plan-holding-overview">
-              <section class="plan-holding-cost" aria-label="交易后持仓成本">
+              <section class="plan-holding-cost">
                 <span class="plan-result-label"
                   >交易后持仓成本 <small>元/股</small></span
                 >
@@ -2422,7 +2401,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 </div>
                 <p>每股摊薄成本 · 含费用及卖出回款</p>
               </section>
-              <section class="plan-market-value" aria-label="交易后持仓市值">
+              <section class="plan-market-value">
                 <span class="plan-result-label"
                   >交易后持仓市值 <small>元</small></span
                 >
@@ -2504,8 +2483,6 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           v-else
           id="planner-panel-reverse"
           class="planner-card planner-reverse"
-          role="tabpanel"
-          aria-labelledby="planner-tab-reverse"
         >
           <header>
             <h3>反推</h3>
@@ -2756,25 +2733,9 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
       <section
         class="modal"
         :class="{ 'history-modal': modal === 'history' }"
-        :role="embedded && action ? undefined : 'dialog'"
-        :aria-modal="embedded && action ? undefined : true"
-        :aria-label="
-          modal === 'history'
-            ? historyTarget?.action === 'delete'
-              ? '删除历史记录'
-              : '修改历史记录'
-            : modal === 'cash'
-              ? '录入资金流水'
-              : modal === 'security'
-                ? '添加证券'
-                : modal === 'opening'
-                  ? '录入期初持仓'
-                  : '恢复账户备份'
-        "
       >
         <button
           class="modal-close"
-          aria-label="关闭对话框"
           :disabled="saving"
           @click="modal = ''"
         >
@@ -2804,7 +2765,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             >发生时间<DateTimeField
               v-model="cashForm.time"
               mode="datetime"
-              aria-label="资金流水发生时间"
+              test-id="cash-entry-time"
           /></label>
           <label
             >金额 · 元（填正数）<input
@@ -2888,7 +2849,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             >期初日期<DateTimeField
               v-model="opening.time"
               mode="datetime"
-              aria-label="期初持仓日期时间"
+              test-id="opening-time"
           /></label>
           <label
             >期初股数 / 份数（整数）<input

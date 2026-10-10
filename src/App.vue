@@ -266,16 +266,15 @@ onUnmounted(() => {
       >
     </header>
 
-    <section class="quote-strip" aria-label="参考行情">
+    <section class="quote-strip">
       <div class="quote-search">
         <span class="eyebrow">参考行情</span>
         <form @submit.prevent="lookup">
-          <select v-model="state.market" aria-label="交易市场">
+          <select v-model="state.market">
             <option value="sh">沪市</option>
             <option value="sz">深市</option></select
           ><input
             v-model="state.code"
-            aria-label="证券代码"
             inputmode="numeric"
             maxlength="6"
             placeholder="输入6位代码"
@@ -324,10 +323,10 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
-    <p v-if="typeMismatch" class="banner warning" role="alert">
+    <p v-if="typeMismatch" class="banner warning">
       行情品种与当前测算品种不一致。请先切换下方「股票 / ETF」，再使用报价。
     </p>
-    <p v-if="notice || saveError" class="banner" role="status">
+    <p v-if="notice || saveError" class="banner">
       {{ saveError || notice }}
     </p>
 
@@ -337,10 +336,9 @@ onUnmounted(() => {
           <h2>交易计划</h2>
           <span class="subtle">输入即算</span>
         </div>
-        <div class="segmented asset-tabs" aria-label="证券品种">
+        <div class="segmented asset-tabs">
           <button
             :class="{ active: state.asset === 'stock' }"
-            :aria-pressed="state.asset === 'stock'"
             @click="
               state.asset = 'stock';
               rememberType();
@@ -349,7 +347,6 @@ onUnmounted(() => {
             A股股票</button
           ><button
             :class="{ active: state.asset === 'etf' }"
-            :aria-pressed="state.asset === 'etf'"
             @click="
               state.asset = 'etf';
               rememberType();
@@ -368,16 +365,14 @@ onUnmounted(() => {
             <option value="bond">债券 ETF</option>
           </select>
         </div>
-        <div class="direction-tabs" aria-label="做T方向">
+        <div class="direction-tabs">
           <button
             :class="{ selected: buyFirst }"
-            :aria-pressed="buyFirst"
             @click="state.direction = 'buy-first'"
           >
             <span>↗</span> 先买后卖</button
           ><button
             :class="{ selected: !buyFirst }"
-            :aria-pressed="!buyFirst"
             @click="state.direction = 'sell-first'"
           >
             <span>↘</span> 先卖后买
@@ -448,18 +443,18 @@ onUnmounted(() => {
         <p class="rule-note"><span>ⓘ</span>{{ rule }}</p>
       </section>
 
-      <section class="panel result-panel" aria-label="测算结果">
+      <section class="panel result-panel">
         <div class="section-heading">
           <h2>这次做T，能赚多少？</h2>
           <span class="estimate-tag">扣费后估算</span>
         </div>
-        <div v-if="result.error" class="invalid-state" role="alert">
+        <div v-if="result.error" class="invalid-state">
           <span>—</span>
           <h3>补全交易计划</h3>
           <p>{{ result.error }}</p>
         </div>
         <template v-else-if="result.value">
-          <div class="profit-summary" aria-live="polite">
+          <div class="profit-summary">
             <span class="eyebrow">本次净利润</span>
             <div class="net-value" :class="tone(result.value.net)">
               <span class="currency">¥</span
@@ -526,7 +521,7 @@ onUnmounted(() => {
                 :key="row.price"
                 :class="{ 'break-even': row.offset === 0 }"
                 @click="applyThreshold(row.price)"
-                :aria-label="`使用${variableLabel}${row.price}`"
+                class="use-target-price"
               >
                 <span>{{
                   row.offset === 0
@@ -581,7 +576,6 @@ onUnmounted(() => {
               <div>
                 <input
                   v-model="fees[field.key]"
-                  :aria-label="`${assetLabel}${field.label}`"
                   inputmode="decimal"
                 /><span>{{ field.unit }}</span>
               </div></label
@@ -619,13 +613,11 @@ onUnmounted(() => {
             <label
               >原持仓数量（{{ unit }}）<input
                 v-model="state.holdingQuantity"
-                aria-label="原持仓数量"
                 inputmode="numeric"
                 placeholder="例如 1000" /></label
             ><label
               >原每股 / 份成本（元）<input
                 v-model="state.holdingPrice"
-                aria-label="原每股成本"
                 inputmode="decimal"
                 placeholder="例如 10.00"
             /></label>

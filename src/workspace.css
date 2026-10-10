@@ -397,11 +397,11 @@ body,
   font-size: 12px;
   box-shadow: none;
 }
-.history-mode-tabs button[aria-current="page"] {
+.history-mode-tabs button.active {
   color: #1f3148;
   font-weight: 650;
 }
-.history-mode-tabs button[aria-current="page"]::after {
+.history-mode-tabs button.active::after {
   position: absolute;
   right: 0;
   bottom: -1px;
@@ -815,7 +815,7 @@ body,
 }
 .desk-summary .summary-help-trigger:hover,
 .desk-summary .summary-help-trigger:focus-visible,
-.desk-summary .summary-help-trigger[aria-expanded="true"] {
+.desk-summary .summary-help-trigger.open {
   border-color: #3268cf;
   color: #3268cf;
   background: #eef4ff;
@@ -1633,7 +1633,7 @@ body,
   outline: 2px solid var(--ui-focus-border);
   outline-offset: -3px;
 }
-.step-control:has(input[aria-invalid="true"]):focus-within {
+.step-control:has(input.invalid):focus-within {
   border-color: #b13342;
   box-shadow: 0 0 0 3px rgba(177, 51, 66, 0.12);
 }

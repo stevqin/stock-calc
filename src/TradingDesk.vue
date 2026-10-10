@@ -971,7 +971,7 @@ watch(drawer, async (open) => {
         `.securities-table tr[data-symbol="${selected.value}"] .security-name`,
       ) ?? (document.activeElement as HTMLElement);
     await nextTick();
-    document.querySelector<HTMLElement>('[aria-label="关闭证券详情"]')?.focus();
+    document.querySelector<HTMLElement>(".security-drawer-close")?.focus();
   } else {
     await nextTick();
     drawerPreviousFocus?.focus({ preventScroll: true });
@@ -989,7 +989,7 @@ watch(dialog, async (value) => {
     const priceInput =
       value === "entry" && action.value === "record"
         ? document.querySelector<HTMLElement>(
-            '.entry-dialog input[aria-label="成交价"]',
+            '.entry-dialog [data-testid="trade-price"]',
           )
         : null;
     (
@@ -1140,7 +1140,7 @@ onBeforeUnmount(() => {
       <div class="desk-brand">
         <b>T</b><strong>T刻<small>证券工作台</small></strong>
       </div>
-      <nav aria-label="主工作区">
+      <nav>
         <button
           v-for="p in [
             { id: 'market', name: '自选与持仓' },
@@ -1162,7 +1162,7 @@ onBeforeUnmount(() => {
         >{{ isTauri() ? "本机账本" : "浏览器预览" }} · 不连接券商账户</span
       >
     </header>
-    <section class="desk-summary" aria-label="账户摘要">
+    <section class="desk-summary">
       <div>
         <div class="summary-label">
           <span>账面总资产</span>
@@ -1294,7 +1294,7 @@ onBeforeUnmount(() => {
           <small
             class="summary-return"
             :class="tone(totals.dailyPercent)"
-            aria-label="今日收益率"
+            data-summary-rate="daily"
             title="收益率＝汇总日收益÷〔日初总市值＋max(当日买入总支出−卖出净收入,0)〕；含当日清仓证券，缺少数据或基数≤0时显示—"
             >{{ percent(totals.dailyPercent) }}</small
           >
@@ -1330,7 +1330,7 @@ onBeforeUnmount(() => {
           <small
             class="summary-return"
             :class="tone(totals.cyclePercent)"
-            aria-label="当前持仓轮次收益率"
+            data-summary-rate="cycle"
             title="收益率＝汇总本轮收益÷汇总本轮净投入；与上方金额范围一致，含当日清仓证券，缺少数据或净投入≤0时显示—"
             >{{ percent(totals.cyclePercent) }}</small
           >
@@ -1414,9 +1414,9 @@ onBeforeUnmount(() => {
       <div class="desk-controls">
         <input
           v-model="query"
-          aria-label="搜索自选"
+          class="security-filter"
           placeholder="搜索名称 / 代码"
-        /><select v-model="assetFilter" aria-label="品种筛选">
+        /><select v-model="assetFilter" class="asset-filter">
           <option value="all">全部品种</option>
           <option value="stock">股票</option>
           <option value="etf">ETF</option>
@@ -1486,9 +1486,6 @@ onBeforeUnmount(() => {
             <aside
               class="security-drawer"
               :class="{ 'security-drawer-chart': detailTab === 'chart' }"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="security-detail-title"
               :inert="dialog ? true : undefined"
             >
               <header>
@@ -1501,8 +1498,7 @@ onBeforeUnmount(() => {
                   >
                 </div>
                 <button
-                  class="drawer-close"
-                  aria-label="关闭证券详情"
+                  class="drawer-close security-drawer-close"
                   @click="closeDrawer"
                 >
                   ×
@@ -1740,27 +1736,13 @@ onBeforeUnmount(() => {
       @click.self="
         !saving && (dialog === 'entry' ? closeEntry() : (dialog = ''))
       "
-      role="dialog"
-      aria-modal="true"
-      :aria-label="
-        dialog === 'entry'
-          ? '录入账本'
-          : dialog === 'columns'
-            ? '设置表格列'
-            : dialog === 'groups'
-              ? '管理分组'
-              : dialog === 'add'
-                ? '添加自选'
-                : '确认操作'
-      "
     >
       <section
         class="desk-dialog"
         :class="{ 'entry-dialog': dialog === 'entry' }"
       >
         <button
-          class="dialog-x"
-          aria-label="关闭对话框"
+          class="dialog-x dialog-close"
           :disabled="saving"
           @click="dialog === 'entry' ? closeEntry() : (dialog = '')"
         >
@@ -1803,7 +1785,6 @@ onBeforeUnmount(() => {
           <div
             v-if="selectedAddId"
             class="selected-security"
-            aria-label="已选择证券"
           >
             <span
               ><strong>{{ add.name }}</strong
@@ -1845,15 +1826,13 @@ onBeforeUnmount(() => {
               <b :title="g.name">{{ g.name }}</b
               ><small>{{ g.members.length }}只</small
               ><button
-                class="group-move"
-                :aria-label="'上移分组' + g.name"
+                class="group-move group-move-up"
                 :disabled="i === 0 || saving"
                 @click="moveGroup(g.id, -1)"
               >
                 ↑</button
               ><button
-                class="group-move"
-                :aria-label="'下移分组' + g.name"
+                class="group-move group-move-down"
                 :disabled="i === w.groups.length - 1 || saving"
                 @click="moveGroup(g.id, 1)"
               >
@@ -1938,7 +1917,6 @@ onBeforeUnmount(() => {
                   v-model="batchGroups"
                   type="checkbox"
                   :value="g.id"
-                  :aria-label="g.name"
                 />
                 <span>{{ g.name }}</span>
                 <small>{{ g.members.length }}只</small>
@@ -2001,7 +1979,7 @@ onBeforeUnmount(() => {
             >
               <button
                 class="column-drag-handle"
-                :aria-label="'拖动排序：' + columnLabels[c]"
+                :title="'拖动排序：' + columnLabels[c]"
                 @pointerdown="beginColumnDrag($event, c)"
                 @keydown.up.prevent="moveColumn(i, -1)"
                 @keydown.down.prevent="moveColumn(i, 1)"
@@ -2010,14 +1988,14 @@ onBeforeUnmount(() => {
               </button>
               <b>{{ columnLabels[c] }}</b
               ><button
-                :aria-label="'上移' + columnLabels[c]"
+                class="column-move-up"
                 :disabled="i === 0"
                 @click="moveColumn(i, -1)"
               >
                 ↑</button
               ><button
                 :disabled="i === columns.columns.length - 1"
-                :aria-label="'下移' + columnLabels[c]"
+                class="column-move-down"
                 @click="moveColumn(i, 1)"
               >
                 ↓</button
@@ -2025,7 +2003,7 @@ onBeforeUnmount(() => {
               ><span
                 v-else
                 class="auto-column-width"
-                :aria-label="columnLabels[c] + '列宽'"
+                :data-column-width="c"
                 >{{ defaultColumnWidth(c, activeViewKind) }}px</span
               >
             </div>

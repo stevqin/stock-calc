@@ -426,7 +426,7 @@ onBeforeUnmount(() => {
         <tr>
           <th class="pin-name">证券 / 代码</th>
           <th class="pin-price">
-            <button aria-label="现价" @click="sort('latest')">
+            <button class="sort-latest" @click="sort('latest')">
               现价（元）
               {{
                 view.sort === "latest"
@@ -438,8 +438,7 @@ onBeforeUnmount(() => {
             </button>
             <button
               v-if="(variant ?? 'holdings') === 'holdings'"
-              class="header-secondary"
-              aria-label="持仓成本单价"
+              class="header-secondary sort-cost"
               title="做T摊薄成本（元），点击按成本排序"
               @click="sort('dilutedCost')"
             >
@@ -455,16 +454,10 @@ onBeforeUnmount(() => {
           <th
             v-for="c in view.columns"
             :key="c"
-            :aria-sort="
-              view.sort === c
-                ? view.direction === 'desc'
-                  ? 'descending'
-                  : 'ascending'
-                : 'none'
-            "
+            :data-column="c"
           >
             <button
-              :aria-label="columnLabels[c]"
+              class="column-sort"
               :title="
                 c === 'marketValue'
                   ? '上行市值（元）；下行持仓（可卖），相等时只显示一个数值；股票为股、ETF为份'

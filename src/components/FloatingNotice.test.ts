@@ -26,12 +26,12 @@ describe("悬浮轻提示", () => {
     expect(document.querySelectorAll(".floating-notices")).toHaveLength(1);
     expect(document.querySelectorAll(".floating-notice")).toHaveLength(2);
     (
-      document.querySelector(".floating-notice button") as HTMLButtonElement
+      document.querySelector(".notice-close") as HTMLButtonElement
     ).click();
     await nextTick();
     expect(document.querySelectorAll(".floating-notices")).toHaveLength(1);
     expect(document.querySelectorAll(".floating-notice")).toHaveLength(1);
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+    expect(document.querySelector(".floating-notice.error")?.textContent).toContain(
       "保存失败",
     );
   });
@@ -39,7 +39,7 @@ describe("悬浮轻提示", () => {
     const w = start({ message: "待对账", kind: "warning" });
     await nextTick();
     (
-      document.querySelector(".floating-notice button") as HTMLButtonElement
+      document.querySelector(".notice-close") as HTMLButtonElement
     ).click();
     await nextTick();
     expect(w.props("message")).toBe("待对账");

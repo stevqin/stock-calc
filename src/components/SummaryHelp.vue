@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useId } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = defineProps<{ label: string }>();
 const open = ref(false);
 const trigger = ref<HTMLButtonElement>();
 const closeButton = ref<HTMLButtonElement>();
-const panelId = `summary-help-${useId()}`;
-const titleId = `${panelId}-title`;
 
 async function show() {
   open.value = true;
@@ -31,28 +29,20 @@ onBeforeUnmount(() => document.removeEventListener("keydown", closeOnEscape));
       ref="trigger"
       type="button"
       class="summary-help-trigger"
-      :aria-label="`查看${props.label}说明`"
-      :aria-expanded="open"
-      :aria-controls="panelId"
+      :title="`查看${props.label}说明`"
       @click.stop="show"
     >
       ?
     </button>
     <Teleport to="body">
       <div v-if="open" class="summary-help-overlay" @click.self="close">
-        <section
-          :id="panelId"
-          class="summary-help-panel"
-          role="dialog"
-          aria-modal="true"
-          :aria-labelledby="titleId"
-        >
+        <section class="summary-help-panel">
           <header>
-            <h2 :id="titleId">{{ props.label }}构成</h2>
+            <h2>{{ props.label }}构成</h2>
             <button
               ref="closeButton"
               type="button"
-              aria-label="关闭指标说明"
+              class="summary-help-close"
               @click="close"
             >
               ×

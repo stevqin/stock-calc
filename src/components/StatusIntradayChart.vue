@@ -97,7 +97,7 @@ onBeforeUnmount(() => clearInterval(timer));
 </script>
 
 <template>
-  <section class="status-chart-card" :aria-label="`${security.name}分时图`">
+  <section class="status-chart-card">
     <header>
       <div>
         <strong>{{ security.name }}</strong>
@@ -109,8 +109,6 @@ onBeforeUnmount(() => clearInterval(timer));
       v-if="geometry"
       viewBox="0 0 276 124"
       preserveAspectRatio="none"
-      role="img"
-      :aria-label="`${security.name}当日分时走势`"
     >
       <line class="chart-grid" x1="7" x2="269" y1="43" y2="43" />
       <line class="chart-grid" x1="7" x2="269" y1="75" y2="75" />

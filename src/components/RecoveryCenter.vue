@@ -144,9 +144,6 @@ onMounted(load);
     <div
       v-if="candidate"
       class="desk-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="确认恢复账户"
     >
       <div class="desk-dialog">
         <h2>用这个恢复点替换当前账户？</h2>

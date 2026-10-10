@@ -103,8 +103,6 @@ onBeforeUnmount(() => {
       v-if="geometry"
       viewBox="0 0 180 56"
       preserveAspectRatio="none"
-      role="img"
-      :aria-label="`${security.name}${mode === 'daily' ? '近60交易日日K' : '分时'}走势`"
     >
       <line
         x1="0"

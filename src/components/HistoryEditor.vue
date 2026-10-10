@@ -124,7 +124,7 @@ function submit() {
             >发生时间<DateTimeField
               v-model="time.value"
               mode="datetime"
-              aria-label="历史记录发生时间"
+              test-id="history-record-time"
           /></label>
           <label v-if="trade && trade.kind !== 'opening'"
             >成交方向<select v-model="tradeForm.kind">
@@ -220,11 +220,7 @@ function submit() {
           /></label>
         </template>
       </fieldset>
-      <div
-        v-if="preview.ledger"
-        class="history-impact"
-        aria-label="账本重算预览"
-      >
+      <div v-if="preview.ledger" class="history-impact">
         <b>全账户：当前 → {{ deleting ? "删除后" : "修改后" }}</b>
         <dl>
           <div>

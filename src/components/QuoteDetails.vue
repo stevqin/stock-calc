@@ -126,10 +126,7 @@ function tone(field: QuoteField): string {
 }
 </script>
 <template>
-  <section
-    class="quote-details"
-    :aria-label="heroOnly ? '股价概览' : '完整行情指标'"
-  >
+  <section class="quote-details">
     <div v-if="!hideHero" class="quote-hero">
       <strong :class="tone({ index: 3, label: '', fallback: 'latest' })">{{
         formatQuoteField(quote?.latest ?? "", "元").replace(/元$/, "")

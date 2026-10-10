@@ -857,7 +857,6 @@ onBeforeUnmount(() => {
   <dl
     v-if="snapshot.length && !hideSnapshot"
     class="chart-snapshot"
-    aria-label="当前分时行情摘要"
   >
     <div v-for="item in snapshot" :key="item.label">
       <dt>{{ item.label }}</dt>
@@ -867,7 +866,7 @@ onBeforeUnmount(() => {
     </div>
   </dl>
   <div class="chart-wrap">
-    <div ref="el" class="chart-canvas" aria-label="证券行情图表"></div>
+    <div ref="el" class="chart-canvas"></div>
     <div v-if="error" class="chart-notice">
       <span>{{ error }}</span
       ><button @click="refresh()">重试</button>

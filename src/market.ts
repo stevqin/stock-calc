@@ -19,6 +19,7 @@ export const fundFlowErrors = reactive<Record<string, string>>({});
 export const fundFlowStatus = reactive({ text: "资金流待获取" });
 export const marketStatus = reactive({ text: "等待行情", cacheError: "" });
 export const chartKey = (id: string, mode: ChartMode) => `${id}:${mode}`;
+export type MarketSecurity = Pick<Security, "id" | "market" | "code">;
 let hydrated = false;
 export async function hydrateMarket() {
   if (hydrated || !isTauri()) return;
@@ -272,7 +273,7 @@ const queue = new RequestQueue();
 const inFlight = new Map<string, Promise<ChartData>>();
 const failedUntil = new Map<string, number>();
 export async function getChart(
-  s: Security,
+  s: MarketSecurity,
   mode: ChartMode,
   active: () => boolean = () => true,
   background = false,

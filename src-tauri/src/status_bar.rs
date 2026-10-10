@@ -23,7 +23,7 @@ impl PanelFocus {
 }
 
 struct Rotation {
-    frames: Vec<String>,
+    frames: Vec<Frame>,
     index: usize,
     paused: bool,
     updated: Instant,
@@ -31,7 +31,7 @@ struct Rotation {
 impl Default for Rotation {
     fn default() -> Self {
         Self {
-            frames: vec!["T刻 · 加载中".into()],
+            frames: vec![Frame::loading()],
             index: 0,
             paused: false,
             updated: Instant::now(),
@@ -39,18 +39,15 @@ impl Default for Rotation {
     }
 }
 impl Rotation {
-    fn replace(&mut self, frames: Vec<String>) {
+    fn replace(&mut self, frames: Vec<Frame>) {
         self.frames = frames;
         self.index %= self.frames.len();
         self.updated = Instant::now();
     }
-    fn title(&self) -> String {
-        let title = &self.frames[self.index];
-        if self.updated.elapsed() > Duration::from_secs(60) && !title.ends_with('*') {
-            format!("{title} *")
-        } else {
-            title.clone()
-        }
+    fn frame(&self) -> Frame {
+        let mut frame = self.frames[self.index].clone();
+        frame.stale |= self.updated.elapsed() > Duration::from_secs(60);
+        frame
     }
     fn advance(&mut self) {
         if !self.paused {
@@ -58,10 +55,56 @@ impl Rotation {
         }
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Tone {
+    Up,
+    Down,
+    Flat,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Frame {
+    label: String,
+    change: String,
+    profit: String,
+    change_tone: Tone,
+    profit_tone: Tone,
+    stale: bool,
+}
+impl Frame {
+    fn plain(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            change: String::new(),
+            profit: String::new(),
+            change_tone: Tone::Flat,
+            profit_tone: Tone::Flat,
+            stale: false,
+        }
+    }
+    fn loading() -> Self {
+        Self::plain("T刻 · 加载中")
+    }
+    fn text(&self) -> String {
+        if self.change.is_empty() && self.profit.is_empty() {
+            return format!("{}{}", self.label, if self.stale { " *" } else { "" });
+        }
+        format!(
+            "{}{}｜{}{}",
+            self.label,
+            self.change,
+            self.profit,
+            if self.stale { " *" } else { "" }
+        )
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Holding {
     id: String,
+    market: String,
+    code: String,
     name: String,
     short_name: String,
     holding_profit: Option<String>,
@@ -81,7 +124,7 @@ pub struct Total {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
-    frames: Vec<String>,
+    frames: Vec<Frame>,
     holdings: Vec<Holding>,
     total: Total,
     date: String,
@@ -91,9 +134,10 @@ pub struct Snapshot {
 pub struct StatusBar(Mutex<Rotation>, Mutex<Option<Snapshot>>);
 
 // The underlying NSStatusItem length is in points, independent of title glyph widths.
-fn set_title(tray: &tauri::tray::TrayIcon, title: String) -> tauri::Result<()> {
+fn set_title(tray: &tauri::tray::TrayIcon, frame: Frame) -> tauri::Result<()> {
+    let title = frame.text();
     #[cfg(target_os = "macos")]
-    tray.with_inner_tray_icon(|inner| {
+    tray.with_inner_tray_icon(move |inner| {
         if let Some(item) = inner.ns_status_item() {
             item.setLength(160.0);
         }
@@ -103,13 +147,44 @@ fn set_title(tray: &tauri::tray::TrayIcon, title: String) -> tauri::Result<()> {
     tray.set_title(Some(&title))?;
     tray.set_tooltip(Some(&title))?;
     #[cfg(target_os = "macos")]
-    tray.with_inner_tray_icon(|inner| {
-        use objc2::MainThreadMarker;
-        use objc2_app_kit::NSAutoresizingMaskOptions;
+    tray.with_inner_tray_icon(move |inner| {
+        use objc2::{runtime::AnyObject, MainThreadMarker};
+        use objc2_app_kit::{NSAutoresizingMaskOptions, NSColor, NSForegroundColorAttributeName};
+        use objc2_foundation::{NSMutableAttributedString, NSRange, NSString};
         let mtm = MainThreadMarker::new().expect("Tauri dispatches tray operations on main thread");
         if let Some(item) = inner.ns_status_item() {
             if let Some(button) = item.button(mtm) {
+                let attributed =
+                    NSMutableAttributedString::from_nsstring(&NSString::from_str(&title));
+                let label_len = frame.label.encode_utf16().count();
+                let change_len = frame.change.encode_utf16().count();
+                let profit_start = label_len + change_len + "｜".encode_utf16().count();
+                let color = |tone: Tone| match tone {
+                    Tone::Up => NSColor::systemRedColor(),
+                    Tone::Down => NSColor::systemGreenColor(),
+                    Tone::Flat => NSColor::labelColor(),
+                };
+                // SAFETY: NSForegroundColorAttributeName requires an NSColor value and
+                // every range is measured in NSString UTF-16 code units.
+                unsafe {
+                    attributed.addAttribute_value_range(
+                        NSForegroundColorAttributeName,
+                        NSColor::labelColor().as_ref() as &AnyObject,
+                        NSRange::new(0, title.encode_utf16().count()),
+                    );
+                    attributed.addAttribute_value_range(
+                        NSForegroundColorAttributeName,
+                        color(frame.change_tone).as_ref() as &AnyObject,
+                        NSRange::new(label_len, change_len),
+                    );
+                    attributed.addAttribute_value_range(
+                        NSForegroundColorAttributeName,
+                        color(frame.profit_tone).as_ref() as &AnyObject,
+                        NSRange::new(profit_start, frame.profit.encode_utf16().count()),
+                    );
+                }
                 button.setFont(Some(&objc2_app_kit::NSFont::systemFontOfSize(11.0)));
+                button.setAttributedTitle(&attributed);
                 button.setUsesSingleLineMode(true);
                 button.setAlignment(objc2_app_kit::NSTextAlignment::Right);
                 if let Some(cell) = button.cell() {
@@ -141,6 +216,9 @@ pub fn get_status_portfolio(state: tauri::State<StatusBar>) -> Result<Option<Sna
 pub fn hide_status_panel(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("status-panel") {
         window.hide().map_err(|e| e.to_string())?;
+        window
+            .emit("status-panel-visible", false)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -264,7 +342,10 @@ fn position_macos_panel(panel: &tauri::WebviewWindow) -> Result<(), String> {
         window.setFrame_display(frame, true);
     }
     panel.show().map_err(|e| e.to_string())?;
-    panel.set_focus().map_err(|e| e.to_string())
+    panel.set_focus().map_err(|e| e.to_string())?;
+    panel
+        .emit("status-panel-visible", true)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
@@ -293,7 +374,9 @@ fn toggle_panel(
         return Ok(());
     };
     if panel.is_visible()? {
-        return panel.hide();
+        panel.hide()?;
+        panel.emit("status-panel-visible", false)?;
+        return Ok(());
     }
     #[cfg(target_os = "macos")]
     {
@@ -330,7 +413,8 @@ fn toggle_panel(
             panel.set_position(PhysicalPosition::new(x, y))?;
         }
         panel.show()?;
-        panel.set_focus()
+        panel.set_focus()?;
+        panel.emit("status-panel-visible", true)
     }
 }
 
@@ -343,16 +427,18 @@ pub fn update_status_bar(
     let frames = &snapshot.frames;
     if frames.is_empty()
         || frames.len() > 1000
-        || frames
-            .iter()
-            .any(|s| s.chars().count() > 200 || s.contains(['\n', '\r']))
+        || frames.iter().any(|frame| {
+            [&frame.label, &frame.change, &frame.profit]
+                .iter()
+                .any(|s| s.chars().count() > 200 || s.contains(['\n', '\r']))
+        })
     {
         return Err("状态栏内容无效".into());
     }
     let (title, index) = {
         let mut rotation = state.0.lock().map_err(|e| e.to_string())?;
         rotation.replace(frames.clone());
-        (rotation.title(), rotation.index)
+        (rotation.frame(), rotation.index)
     };
     if let Some(tray) = app.tray_by_id("portfolio") {
         set_title(&tray, title).map_err(|e| e.to_string())?;
@@ -463,6 +549,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
             if let Ok(mut focus) = focus.lock() {
                 if focus.changed(*focused) {
                     let _ = panel_handle.hide();
+                    let _ = panel_handle.emit("status-panel-visible", false);
                 }
             }
         }
@@ -488,7 +575,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
             }
         })
         .build(app)?;
-    set_title(&tray, "T刻 · 加载中".into())?;
+    set_title(&tray, Frame::loading())?;
     let handle = app.handle().clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(5));
@@ -498,7 +585,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
                 break;
             };
             rotation.advance();
-            (rotation.title(), rotation.index)
+            (rotation.frame(), rotation.index)
         };
         let Some(tray) = handle.tray_by_id("portfolio") else {
             break;
@@ -521,6 +608,20 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frame_keeps_independent_tones_and_formats_delay_marker() {
+        let frame = Frame {
+            label: "茅台 ".into(),
+            change: "+1.25%".into(),
+            profit: "-¥320".into(),
+            change_tone: Tone::Up,
+            profit_tone: Tone::Down,
+            stale: true,
+        };
+        assert_eq!(frame.change_tone, Tone::Up);
+        assert_eq!(frame.profit_tone, Tone::Down);
+        assert_eq!(frame.text(), "茅台 +1.25%｜-¥320 *");
+    }
     #[test]
     fn panel_material_clips_the_rectangular_webview_to_its_rounded_shape() {
         let geometry = panel_material_geometry();
@@ -599,11 +700,13 @@ mod tests {
     #[test]
     fn stale_marker_is_a_single_asterisk_even_while_paused() {
         let mut rotation = Rotation::default();
-        rotation.replace(vec!["茅台 +1.25%｜+¥320 *".into()]);
+        let mut frame = Frame::plain("茅台 +1.25%｜+¥320");
+        frame.stale = true;
+        rotation.replace(vec![frame]);
         rotation.paused = true;
         rotation.updated = Instant::now() - Duration::from_secs(61);
         rotation.advance();
-        assert_eq!(rotation.title(), "茅台 +1.25%｜+¥320 *");
+        assert_eq!(rotation.frame().text(), "茅台 +1.25%｜+¥320 *");
     }
     #[test]
     fn startup_blur_does_not_dismiss_panel_before_focus_arrives() {
@@ -619,26 +722,30 @@ mod tests {
     #[test]
     fn cycles_holdings_then_summary_and_wraps() {
         let mut r = Rotation::default();
-        r.replace(vec!["A".into(), "B".into(), "合计".into()]);
-        assert_eq!(r.title(), "A");
+        r.replace(vec![
+            Frame::plain("A"),
+            Frame::plain("B"),
+            Frame::plain("合计"),
+        ]);
+        assert_eq!(r.frame().text(), "A");
         r.advance();
-        assert_eq!(r.title(), "B");
+        assert_eq!(r.frame().text(), "B");
         r.advance();
-        assert_eq!(r.title(), "合计");
+        assert_eq!(r.frame().text(), "合计");
         r.advance();
-        assert_eq!(r.title(), "A");
+        assert_eq!(r.frame().text(), "A");
     }
     #[test]
     fn pause_keeps_position_but_accepts_new_quotes_and_removed_holdings() {
         let mut r = Rotation::default();
-        r.replace(vec!["A".into(), "合计".into()]);
+        r.replace(vec![Frame::plain("A"), Frame::plain("合计")]);
         r.advance();
         r.paused = true;
         r.advance();
-        assert_eq!(r.title(), "合计");
-        r.replace(vec!["新合计".into()]);
-        assert_eq!(r.title(), "新合计");
+        assert_eq!(r.frame().text(), "合计");
+        r.replace(vec![Frame::plain("新合计")]);
+        assert_eq!(r.frame().text(), "新合计");
         r.updated = Instant::now() - Duration::from_secs(61);
-        assert_eq!(r.title(), "新合计 *");
+        assert_eq!(r.frame().text(), "新合计 *");
     }
 }

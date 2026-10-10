@@ -862,6 +862,8 @@ const menuBarSnapshot = computed<StatusSnapshot>(() => {
   );
   const holdings = held.map((id) => ({
     id,
+    market: securities.value.get(id)?.market ?? (id.slice(0, 2) as "sh" | "sz"),
+    code: securities.value.get(id)?.code ?? id.slice(2),
     name: securities.value.get(id)?.name ?? id,
     shortName: names[id],
     change: marketQuotes[id]?.change ?? null,

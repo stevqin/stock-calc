@@ -22,9 +22,30 @@ describe("menu bar portfolio frames", () => {
         { percent: "1.25", profit: "1280", stale: false },
       ),
     ).toEqual([
-      "贵州茅台 +1.25%｜+¥320",
-      "沪深300ETF -0.50%｜-¥25.25",
-      "合计+1.25%｜+¥1,280",
+      {
+        label: "贵州茅台 ",
+        change: "+1.25%",
+        profit: "+¥320",
+        changeTone: "up",
+        profitTone: "up",
+        stale: false,
+      },
+      {
+        label: "沪深300ETF ",
+        change: "-0.50%",
+        profit: "-¥25.25",
+        changeTone: "down",
+        profitTone: "down",
+        stale: false,
+      },
+      {
+        label: "合计",
+        change: "+1.25%",
+        profit: "+¥1,280",
+        changeTone: "up",
+        profitTone: "up",
+        stale: false,
+      },
     ]);
   });
   it("keeps unavailable data distinct from zero and marks delayed data", () => {
@@ -33,10 +54,29 @@ describe("menu bar portfolio frames", () => {
         [{ name: "测试", change: null, profit: null, stale: true }],
         { percent: null, profit: null, stale: true },
       ),
-    ).toEqual(["测试 —｜— *", "合计—｜— *"]);
+    ).toEqual([
+      {
+        label: "测试 ",
+        change: "—",
+        profit: "—",
+        changeTone: "flat",
+        profitTone: "flat",
+        stale: true,
+      },
+      {
+        label: "合计",
+        change: "—",
+        profit: "—",
+        changeTone: "flat",
+        profitTone: "flat",
+        stale: true,
+      },
+    ]);
     expect(
       statusBarFrames([], { percent: null, profit: "0", stale: false }),
-    ).toEqual(["合计—｜¥0"]);
+    ).toMatchObject([
+      { change: "—", profit: "¥0", changeTone: "flat", profitTone: "flat" },
+    ]);
   });
   it("does not display negative zero after rounding", () => {
     expect(
@@ -45,7 +85,25 @@ describe("menu bar portfolio frames", () => {
         profit: "-0.001",
         stale: false,
       }),
-    ).toEqual(["合计0.00%｜¥0"]);
+    ).toMatchObject([
+      {
+        change: "0.00%",
+        profit: "¥0",
+        changeTone: "flat",
+        profitTone: "flat",
+      },
+    ]);
+  });
+  it("colors change and today's profit independently", () => {
+    expect(
+      statusBarFrames(
+        [{ name: "测试", change: "1.20", profit: "-50", stale: false }],
+        { percent: "-0.20", profit: "80", stale: false },
+      ),
+    ).toMatchObject([
+      { changeTone: "up", profitTone: "down" },
+      { changeTone: "down", profitTone: "up" },
+    ]);
   });
 });
 

@@ -28,6 +28,7 @@ describe("持仓下拉面板", () => {
       "我的持仓（2026-09-08）5",
     );
     expect(wrapper.get(".edit-alias").text()).toBe("编辑");
+    expect(wrapper.get(".status-chart-card").text()).toContain("卫星ETF富国");
     const row = wrapper.findAll("tbody tr")[3];
     expect(row.classes()).toContain("is-active");
     expect(row.text()).toContain("卫星ETF富国");
@@ -80,10 +81,12 @@ describe("持仓下拉面板", () => {
       .mock.calls.find(([event]) => event === "status-active-index")![1];
     rotate({ payload: 0 } as never);
     await flushPromises();
+    expect(wrapper.get(".status-chart-card").text()).toContain("贵州茅台");
     expect(wrapper.findAll("tbody tr")[0].classes()).toContain("is-active");
     expect(row.classes()).not.toContain("is-active");
     rotate({ payload: sample.holdings.length } as never);
     await flushPromises();
+    expect(wrapper.get(".status-chart-card").text()).toContain("贵州茅台");
     expect(wrapper.get(".panel-total").classes()).not.toContain("is-active");
     expect(wrapper.findAll("tbody tr.is-active")).toHaveLength(0);
     await wrapper.get(".open-main").trigger("click");

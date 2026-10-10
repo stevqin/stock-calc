@@ -6,6 +6,8 @@ export const sample: StatusSnapshot = {
   holdings: [
     {
       id: "sh600519",
+      market: "sh",
+      code: "600519",
       name: "贵州茅台",
       shortName: "茅台",
       change: "1.25",
@@ -18,6 +20,8 @@ export const sample: StatusSnapshot = {
     },
     {
       id: "sz002437",
+      market: "sz",
+      code: "002437",
       name: "誉衡药业",
       shortName: "誉衡",
       change: "-2.28",
@@ -30,6 +34,8 @@ export const sample: StatusSnapshot = {
     },
     {
       id: "sh603626",
+      market: "sh",
+      code: "603626",
       name: "科森科技",
       shortName: "科森",
       change: "9.99",
@@ -42,6 +48,8 @@ export const sample: StatusSnapshot = {
     },
     {
       id: "sh563230",
+      market: "sh",
+      code: "563230",
       name: "卫星ETF富国",
       shortName: "卫星",
       change: "1.20",
@@ -54,6 +62,8 @@ export const sample: StatusSnapshot = {
     },
     {
       id: "sh510300",
+      market: "sh",
+      code: "510300",
       name: "沪深300ETF",
       shortName: "沪深300",
       change: null,
@@ -68,6 +78,7 @@ export const sample: StatusSnapshot = {
   total: { percent: "1.25", profit: "1280", stale: false },
 };
 let paused = false;
+export const isTauri = () => false;
 export async function invoke(command: string, args?: { paused: boolean }) {
   if (command === "get_status_active_index") return 0;
   if (command === "get_status_portfolio") return sample;

@@ -11,6 +11,15 @@ export interface TotalFrame {
   profit: string | null;
   stale: boolean;
 }
+export type StatusTone = "up" | "down" | "flat";
+export interface StatusFrame {
+  label: string;
+  change: string;
+  profit: string;
+  changeTone: StatusTone;
+  profitTone: StatusTone;
+  stale: boolean;
+}
 export function signed(value: string | null, money = false): string {
   if (value === null) return "—";
   const amount = new Decimal(value).toDecimalPlaces(2);
@@ -41,20 +50,33 @@ export function compactMoney(value: string | null): string {
 export function statusBarFrames(
   holdings: HoldingFrame[],
   total: TotalFrame,
-): string[] {
+): StatusFrame[] {
   return [
-    ...holdings.map(
-      (row) =>
-        `${row.name} ${signed(row.change)}｜${compactMoney(row.profit)}${row.stale ? " *" : ""}`,
-    ),
-    `合计${signed(total.percent)}｜${compactMoney(total.profit)}${total.stale ? " *" : ""}`,
+    ...holdings.map((row) => ({
+      label: `${row.name} `,
+      change: signed(row.change),
+      profit: compactMoney(row.profit),
+      changeTone: statusTone(row.change),
+      profitTone: statusTone(row.profit),
+      stale: row.stale,
+    })),
+    {
+      label: "合计",
+      change: signed(total.percent),
+      profit: compactMoney(total.profit),
+      changeTone: statusTone(total.percent),
+      profitTone: statusTone(total.profit),
+      stale: total.stale,
+    },
   ];
 }
 
 export interface StatusSnapshot {
-  frames: string[];
+  frames: StatusFrame[];
   holdings: (HoldingFrame & {
     id: string;
+    market: "sh" | "sz";
+    code: string;
     shortName: string;
     holdingProfit: string | null;
     price: string | null;
@@ -65,7 +87,7 @@ export interface StatusSnapshot {
   date: string;
   updatedAt: number;
 }
-export function statusTone(value: string | null): "up" | "down" | "flat" {
+export function statusTone(value: string | null): StatusTone {
   if (value === null) return "flat";
   const amount = new Decimal(value).toDecimalPlaces(2);
   return !amount.isFinite() || amount.isZero()

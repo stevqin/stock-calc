@@ -1,14 +1,24 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount } from "vue";
+import {
+  computed,
+  ref,
+  reactive,
+  onMounted,
+  onBeforeUnmount,
+  watch,
+} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emitTo, type UnlistenFn } from "@tauri-apps/api/event";
 import { signed, statusTone, type StatusSnapshot } from "./statusBar";
+import StatusIntradayChart from "./components/StatusIntradayChart.vue";
 const snapshot = ref<StatusSnapshot>();
 const error = ref("");
 const editing = ref(false);
 const activeIndex = ref<number | null>(null);
 const paused = ref<boolean | null>(null);
 const changingPause = ref(false);
+const panelVisible = ref(false);
+const lastStockIndex = ref(0);
 const drafts = reactive<Record<string, string>>({});
 function toggleEditing() {
   if (!editing.value) {
@@ -20,7 +30,28 @@ function toggleEditing() {
 }
 let stop: UnlistenFn | undefined;
 let stopActive: UnlistenFn | undefined;
+let stopVisible: UnlistenFn | undefined;
 let disposed = false;
+watch(activeIndex, (index) => {
+  if (
+    index !== null &&
+    index >= 0 &&
+    index < (snapshot.value?.holdings.length ?? 0)
+  )
+    lastStockIndex.value = index;
+});
+watch(snapshot, (next) => {
+  if (!next?.holdings.length) return;
+  if (activeIndex.value !== null && activeIndex.value < next.holdings.length)
+    lastStockIndex.value = activeIndex.value;
+  else if (lastStockIndex.value >= next.holdings.length)
+    lastStockIndex.value = next.holdings.length - 1;
+});
+const chartHolding = computed(() => {
+  const rows = snapshot.value?.holdings ?? [];
+  if (!rows.length) return null;
+  return rows[Math.min(lastStockIndex.value, rows.length - 1)];
+});
 async function close() {
   await invoke("hide_status_panel");
 }
@@ -67,6 +98,12 @@ function keys(event: KeyboardEvent) {
 onMounted(async () => {
   document.addEventListener("keydown", keys);
   try {
+    stopVisible = await listen<boolean>(
+      "status-panel-visible",
+      ({ payload }) => {
+        panelVisible.value = payload;
+      },
+    );
     let receivedActive = false;
     stopActive = await listen<number>("status-active-index", ({ payload }) => {
       receivedActive = true;
@@ -98,6 +135,7 @@ onBeforeUnmount(() => {
   disposed = true;
   stop?.();
   stopActive?.();
+  stopVisible?.();
   document.removeEventListener("keydown", keys);
 });
 </script>
@@ -115,6 +153,12 @@ onBeforeUnmount(() => {
       </button>
     </header>
     <p v-if="error" role="alert" class="panel-error">{{ error }}</p>
+    <StatusIntradayChart
+      v-if="chartHolding"
+      :key="chartHolding.id"
+      :security="chartHolding"
+      :active="panelVisible"
+    />
     <div class="holdings-scroll">
       <table aria-label="菜单栏持仓列表">
         <colgroup>

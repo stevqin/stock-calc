@@ -68,7 +68,16 @@ it("publishes a summary, wakes background quotes, and removes native listeners o
   expect(listen).toHaveBeenCalledWith("status-bar-tick", expect.any(Function));
   expect(invoke).toHaveBeenCalledWith("update_status_bar", {
     snapshot: expect.objectContaining({
-      frames: ["合计—｜¥0"],
+      frames: [
+        {
+          label: "合计",
+          change: "—",
+          profit: "¥0",
+          changeTone: "flat",
+          profitTone: "flat",
+          stale: false,
+        },
+      ],
       holdings: [],
     }),
   });

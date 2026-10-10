@@ -372,6 +372,18 @@ fn show_window(app: &tauri::AppHandle) {
         let _ = app.emit_to("main", "main-window-activated", ());
     }
 }
+#[cfg(any(target_os = "macos", test))]
+struct PanelMaterialGeometry {
+    corner_radius: f64,
+    clips_content: bool,
+}
+#[cfg(any(target_os = "macos", test))]
+fn panel_material_geometry() -> PanelMaterialGeometry {
+    PanelMaterialGeometry {
+        corner_radius: 18.0,
+        clips_content: true,
+    }
+}
 #[cfg(target_os = "macos")]
 fn install_panel_material(panel: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
     use objc2::MainThreadMarker;
@@ -391,6 +403,7 @@ fn install_panel_material(panel: &tauri::WebviewWindow) -> Result<(), Box<dyn st
     if objc2::available!(macos = 26.0) {
         // Tauri retains the live window; retain its content before reparenting.
         unsafe {
+            let geometry = panel_material_geometry();
             let window = &*ptr.cast::<NSWindow>();
             let content = window.contentView().ok_or("面板内容视图不可用")?;
             let glass = NSGlassEffectView::new(mtm);
@@ -400,7 +413,11 @@ fn install_panel_material(panel: &tauri::WebviewWindow) -> Result<(), Box<dyn st
                     | NSAutoresizingMaskOptions::ViewHeightSizable,
             );
             glass.setStyle(NSGlassEffectViewStyle::Regular);
-            glass.setCornerRadius(18.0);
+            glass.setCornerRadius(geometry.corner_radius);
+            // NSGlassEffectView rounds the glass itself, but it does not clip the
+            // embedded WebView by default. On bright backgrounds that rectangular
+            // child surface is visible outside the curved glass corners.
+            glass.setClipsToBounds(geometry.clips_content);
             window.setContentView(None);
             glass.setContentView(Some(&content));
             window.setContentView(Some(&glass));
@@ -504,6 +521,12 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn panel_material_clips_the_rectangular_webview_to_its_rounded_shape() {
+        let geometry = panel_material_geometry();
+        assert_eq!(geometry.corner_radius, 18.0);
+        assert!(geometry.clips_content);
+    }
     #[cfg(target_os = "macos")]
     #[test]
     fn popup_can_join_fullscreen_spaces_without_conflicting_document_flags() {

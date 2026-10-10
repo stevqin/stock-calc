@@ -479,6 +479,11 @@ it("历史成交按完整日期范围筛选，支持单边、叠加证券筛选�
   expect(start.attributes("type")).toBe("date");
   expect(end.attributes("type")).toBe("date");
   expect(rows()).toBe(3);
+  expect((start.element as HTMLInputElement).value).toBe("");
+  await start.trigger("focus");
+  expect((start.element as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(wrapper.get(".history-filter-result button").attributes("disabled")).toBeUndefined();
+  await start.setValue("");
   await start.setValue("2026-08-26");
   expect(rows()).toBe(2);
   await end.setValue("2026-08-26");

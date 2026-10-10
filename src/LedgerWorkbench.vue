@@ -107,6 +107,13 @@ const historyStart = ref("");
 const historyEnd = ref("");
 const historyMode = ref<"records" | "reconcile">("records");
 const historyIssuesOnly = ref(true);
+function activateHistoryDate(boundary: "start" | "end") {
+  const target = boundary === "start" ? historyStart : historyEnd;
+  // WebKit paints today's year/month/day as segment placeholders even while
+  // input.value is still empty. Commit that visible date on first focus so
+  // changing only one or two segments still produces a real filter value.
+  if (!target.value) target.value = localDateTime().slice(0, 10);
+}
 function historyFilterTime(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return NaN;
   const time = new Date(`${value}T00:00:00+08:00`);
@@ -1891,6 +1898,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               aria-label="开始日期"
               title="留空表示不限开始日期"
               :aria-invalid="historyBounds.invalid"
+              @focus="activateHistoryDate('start')"
             />
             <span class="history-date-separator" aria-hidden="true">—</span>
             <input
@@ -1899,6 +1907,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               aria-label="结束日期"
               title="包含所选日期；留空表示不限结束日期"
               :aria-invalid="historyBounds.invalid"
+              @focus="activateHistoryDate('end')"
             />
           </div>
           <div v-if="historyMode === 'records'" class="history-filter-result">

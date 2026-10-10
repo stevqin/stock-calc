@@ -17,6 +17,7 @@ import StepField from "./components/StepField.vue";
 import PriceChange from "./components/PriceChange.vue";
 import HistoryEditor from "./components/HistoryEditor.vue";
 import SecuritySearch from "./components/SecuritySearch.vue";
+import DateTimeField from "./components/DateTimeField.vue";
 import type { SecurityHit } from "./securitySearch";
 import type { HistoryTarget } from "./sim/history";
 import { QuotePoller, quoteAge, type Quote } from "./quotes";
@@ -107,13 +108,6 @@ const historyStart = ref("");
 const historyEnd = ref("");
 const historyMode = ref<"records" | "reconcile">("records");
 const historyIssuesOnly = ref(true);
-function activateHistoryDate(boundary: "start" | "end") {
-  const target = boundary === "start" ? historyStart : historyEnd;
-  // WebKit paints today's year/month/day as segment placeholders even while
-  // input.value is still empty. Commit that visible date on first focus so
-  // changing only one or two segments still produces a real filter value.
-  if (!target.value) target.value = localDateTime().slice(0, 10);
-}
 function historyFilterTime(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return NaN;
   const time = new Date(`${value}T00:00:00+08:00`);
@@ -1451,10 +1445,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 </div>
               </div>
               <label class="trade-time"
-                >发生时间<input
+                >发生时间<DateTimeField
                   v-model="tradeTime"
-                  type="datetime-local"
-                  step="1"
+                  mode="datetime"
+                  aria-label="成交发生时间"
               /></label>
             </div>
             <p class="trade-price-limits">
@@ -1892,22 +1886,24 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           />
           <div class="history-date-range" role="group" aria-label="日期范围">
             <span class="history-date-caption">日期</span>
-            <input
+            <DateTimeField
               v-model="historyStart"
-              type="date"
+              mode="date"
               aria-label="开始日期"
+              placeholder="开始日期"
+              compact
               title="留空表示不限开始日期"
-              :aria-invalid="historyBounds.invalid"
-              @focus="activateHistoryDate('start')"
+              :invalid="historyBounds.invalid"
             />
             <span class="history-date-separator" aria-hidden="true">—</span>
-            <input
+            <DateTimeField
               v-model="historyEnd"
-              type="date"
+              mode="date"
               aria-label="结束日期"
+              placeholder="结束日期"
+              compact
               title="包含所选日期；留空表示不限结束日期"
-              :aria-invalid="historyBounds.invalid"
-              @focus="activateHistoryDate('end')"
+              :invalid="historyBounds.invalid"
             />
           </div>
           <div v-if="historyMode === 'records'" class="history-filter-result">
@@ -2804,10 +2800,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             </select></label
           >
           <label
-            >发生时间<input
+            >发生时间<DateTimeField
               v-model="cashForm.time"
-              type="datetime-local"
-              step="1"
+              mode="datetime"
+              aria-label="资金流水发生时间"
           /></label>
           <label
             >金额 · 元（填正数）<input
@@ -2888,10 +2884,10 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             期初日期须早于该证券首笔成交，且只录入一次；作为实物资产转入，不扣除账面现金。不要同时重复录入期初日前的历史买入。
           </p>
           <label
-            >期初日期<input
+            >期初日期<DateTimeField
               v-model="opening.time"
-              type="datetime-local"
-              step="1"
+              mode="datetime"
+              aria-label="期初持仓日期时间"
           /></label>
           <label
             >期初股数 / 份数（整数）<input

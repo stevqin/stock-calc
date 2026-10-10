@@ -516,7 +516,7 @@ describe("重构工作台集成", () => {
     expect(wrapper.findAll('[role="dialog"]')).toHaveLength(1);
     const modal = wrapper.find(".entry-dialog .modal");
     expect(modal.findAll("label")).toHaveLength(4);
-    expect(modal.find('input[type="datetime-local"]').exists()).toBe(true);
+    expect(modal.find('[aria-label="资金流水发生时间"]').exists()).toBe(true);
     expect(saveAccount).not.toHaveBeenCalled();
   });
   it("分组上下移动按钮有明确名称，表单采用统一分组布局", async () => {

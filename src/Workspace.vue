@@ -13,6 +13,7 @@ import Decimal from "decimal.js";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import MarketChart from "./components/MarketChart.vue";
 import HistoryEditor from "./components/HistoryEditor.vue";
+import DateTimeField from "./components/DateTimeField.vue";
 import type { HistoryTarget } from "./sim/history";
 import { QuotePoller, quoteAge, type Quote } from "./quotes";
 import {
@@ -767,7 +768,10 @@ onBeforeUnmount(() => {
         </div>
         <form @submit.prevent="placeOrder">
           <label
-            >发生时间<input v-model="tradeTime" type="datetime-local" step="1"
+            >发生时间<DateTimeField
+              v-model="tradeTime"
+              mode="datetime"
+              aria-label="成交发生时间"
           /></label>
           <div class="form-grid compact">
             <label
@@ -1394,10 +1398,10 @@ onBeforeUnmount(() => {
             </select></label
           >
           <label
-            >发生时间<input
+            >发生时间<DateTimeField
               v-model="cashForm.time"
-              type="datetime-local"
-              step="1"
+              mode="datetime"
+              aria-label="资金流水发生时间"
           /></label>
           <label
             >金额 · 元（填正数）<input
@@ -1478,10 +1482,10 @@ onBeforeUnmount(() => {
             期初日期须早于该证券首笔成交，且只录入一次；作为实物资产转入，不扣除账面现金。不要同时重复录入期初日前的历史买入。
           </p>
           <label
-            >期初日期<input
+            >期初日期<DateTimeField
               v-model="opening.time"
-              type="datetime-local"
-              step="1"
+              mode="datetime"
+              aria-label="期初持仓日期时间"
           /></label>
           <label
             >期初股数 / 份数（整数）<input

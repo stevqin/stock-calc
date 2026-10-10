@@ -2,6 +2,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { marketQuotes } from "./market";
 import LedgerWorkbench from "./LedgerWorkbench.vue";
+import DateTimeField from "./components/DateTimeField.vue";
 import { manualAccount, draftRecord, insertRecord } from "./sim/record";
 import { loadAccount, saveAccount } from "./sim/repository";
 import { readDraft, writeDraft } from "./sim/drafts";
@@ -65,7 +66,15 @@ async function start() {
   });
   await flushPromises();
   await wrapper.find('[aria-label="成交价"]').setValue("10");
-  await wrapper.find('input[type="datetime-local"]').setValue(time);
+  await setTradeTime(time);
+}
+async function setTradeTime(value: string) {
+  const field = wrapper
+    .findAllComponents(DateTimeField)
+    .find((item) => item.props("ariaLabel") === "成交发生时间");
+  if (!field) throw new Error("找不到成交发生时间控件");
+  field.vm.$emit("update:modelValue", value);
+  await wrapper.vm.$nextTick();
 }
 describe("先输入再选择买卖", () => {
   it("显示双向成交金额和费用，超卖只禁用卖出而不显示持仓不足提示", async () => {
@@ -107,7 +116,7 @@ describe("先输入再选择买卖", () => {
     expect(wrapper.find('[aria-label="成交价"]').exists()).toBe(true);
     await flushPromises();
     await wrapper.get('[aria-label="成交价"]').setValue("10");
-    await wrapper.get('input[type="datetime-local"]').setValue(time);
+    await setTradeTime(time);
     expect(
       wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
     ).toContain("10.0000 → 10.0046");
@@ -119,11 +128,11 @@ describe("先输入再选择买卖", () => {
   it("紧凑布局只有一个成交时间输入，切换费用口径不清空交易字段或实际费用", async () => {
     await start();
     const originalTime = (
-      wrapper.find('input[type="datetime-local"]').element as HTMLInputElement
+      wrapper.find('[aria-label="成交发生时间"]').element as HTMLInputElement
     ).value;
-    expect(wrapper.findAll('input[type="datetime-local"]')).toHaveLength(1);
+    expect(wrapper.findAll('[aria-label="成交发生时间"]')).toHaveLength(1);
     expect(
-      wrapper.find('.trade-main-fields input[type="datetime-local"]').exists(),
+      wrapper.find('.trade-main-fields [aria-label="成交发生时间"]').exists(),
     ).toBe(true);
     await wrapper.find(".trade-fee-fields select").setValue("actual");
     await wrapper.find(".actual-fees input").setValue("1.25");
@@ -137,7 +146,7 @@ describe("先输入再选择买卖", () => {
       (wrapper.find('[aria-label="成交价"]').element as HTMLInputElement).value,
     ).toBe("10");
     expect(
-      (wrapper.find('input[type="datetime-local"]').element as HTMLInputElement)
+      (wrapper.find('[aria-label="成交发生时间"]').element as HTMLInputElement)
         .value,
     ).toBe(originalTime);
     expect(saveAccount).not.toHaveBeenCalled();
@@ -266,9 +275,7 @@ describe("先输入再选择买卖", () => {
       (wrapper.get('[aria-label="成交股数"]').element as HTMLInputElement)
         .value,
     ).toBe("100");
-    await wrapper
-      .get('input[type="datetime-local"]')
-      .setValue("2026-08-27T10:00:00");
+    await setTradeTime("2026-08-27T10:00:00");
     expect(price.attributes("max")).toBe("1000000");
     await price.setValue("12");
     expect(

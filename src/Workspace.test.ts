@@ -2,6 +2,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import Workspace from "./LedgerWorkbench.vue";
 import SecuritySearch from "./components/SecuritySearch.vue";
+import DateTimeField from "./components/DateTimeField.vue";
 import { newAccount } from "./sim/ledger";
 import {
   manualAccount,
@@ -27,6 +28,14 @@ async function start() {
 }
 const button = (text: string) =>
   wrapper.findAll("button").find((b) => b.text() === text)!;
+async function setDateTime(label: string, value: string) {
+  const field = wrapper
+    .findAllComponents(DateTimeField)
+    .find((item) => item.props("ariaLabel") === label);
+  if (!field) throw new Error(`找不到日期控件：${label}`);
+  field.vm.$emit("update:modelValue", value);
+  await wrapper.vm.$nextTick();
+}
 beforeEach(() => {
   vi.clearAllMocks();
   const a = newAccount();
@@ -206,11 +215,11 @@ describe("交易台", () => {
     expect(wrapper.find(".history-body > fieldset").exists()).toBe(true);
     expect(wrapper.find(".history-body > .history-impact").exists()).toBe(true);
     expect(
-      wrapper.findAll('.history-time-fields input[type="datetime-local"]'),
+      wrapper.findAll('.history-time-fields [aria-label="历史记录发生时间"]'),
     ).toHaveLength(1);
     const editor = wrapper.find(".history-editor");
     const originalTime = (
-      editor.find('input[type="datetime-local"]').element as HTMLInputElement
+      editor.find('[aria-label="历史记录发生时间"]').element as HTMLInputElement
     ).value;
     await editor.findAll("input")[1].setValue("9.5");
     await editor.find(".actual-fees input").setValue("1.23");
@@ -226,8 +235,10 @@ describe("交易台", () => {
       "9.5",
     );
     expect(
-      (editor.find('input[type="datetime-local"]').element as HTMLInputElement)
-        .value,
+      (
+        editor.find('[aria-label="历史记录发生时间"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe(originalTime);
     await button("取消").trigger("click");
     expect(saveAccount).not.toHaveBeenCalled();
@@ -355,9 +366,7 @@ describe("交易台", () => {
     });
     await start();
     await button("＋ 资金流水").trigger("click");
-    await wrapper
-      .find('.modal input[type="datetime-local"]')
-      .setValue("2026-08-25T09:00:00");
+    await setDateTime("资金流水发生时间", "2026-08-25T09:00:00");
     await wrapper
       .find('input[placeholder="以实际到账 / 转出金额为准"]')
       .setValue("1000");
@@ -476,19 +485,20 @@ it("历史成交按完整日期范围筛选，支持单边、叠加证券筛选�
   const rows = () => wrapper.findAll(".ledger-history-table tbody tr").length;
   const start = wrapper.get('[aria-label="开始日期"]');
   const end = wrapper.get('[aria-label="结束日期"]');
-  expect(start.attributes("type")).toBe("date");
-  expect(end.attributes("type")).toBe("date");
+  expect(start.attributes("role")).toBe("combobox");
+  expect(end.attributes("role")).toBe("combobox");
   expect(rows()).toBe(3);
   expect((start.element as HTMLInputElement).value).toBe("");
   await start.trigger("focus");
-  expect((start.element as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  expect(wrapper.get(".history-filter-result button").attributes("disabled")).toBeUndefined();
-  await start.setValue("");
-  await start.setValue("2026-08-26");
+  expect((start.element as HTMLInputElement).value).toBe("");
+  expect(
+    wrapper.get(".history-filter-result button").attributes("disabled"),
+  ).toBeDefined();
+  await setDateTime("开始日期", "2026-08-26");
   expect(rows()).toBe(2);
-  await end.setValue("2026-08-26");
+  await setDateTime("结束日期", "2026-08-26");
   expect(rows()).toBe(1);
-  await start.setValue("");
+  await setDateTime("开始日期", "");
   expect(rows()).toBe(2);
   wrapper.findComponent(SecuritySearch).vm.$emit(
     "select",
@@ -498,11 +508,11 @@ it("历史成交按完整日期范围筛选，支持单边、叠加证券筛选�
   expect(rows()).toBe(0);
   await wrapper.get(".history-filter-result button").trigger("click");
   expect(rows()).toBe(3);
-  await start.setValue("2026-08-27");
-  await end.setValue("2026-08-25");
+  await setDateTime("开始日期", "2026-08-27");
+  await setDateTime("结束日期", "2026-08-25");
   expect(rows()).toBe(0);
   expect(wrapper.find('[role="alert"]').exists()).toBe(true);
-  await end.setValue("2099-01-01");
+  await setDateTime("结束日期", "2099-01-01");
   expect(rows()).toBe(1);
   expect(saveAccount).not.toHaveBeenCalled();
 });

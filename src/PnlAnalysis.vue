@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateTimeField from "./components/DateTimeField.vue";
 import {
   computed,
   ref,
@@ -483,15 +484,15 @@ const chart = computed(() => {
         </button>
       </div>
       <div v-if="preset === 'custom'" class="pnl-date-range">
-        <input
+        <DateTimeField
           v-model="customStart"
-          type="date"
+          mode="date"
           aria-label="分析开始日期"
           :max="customEnd"
         /><span>至</span
-        ><input
+        ><DateTimeField
           v-model="customEnd"
-          type="date"
+          mode="date"
           aria-label="分析结束日期"
           :min="customStart"
           :max="today"
@@ -721,10 +722,10 @@ const chart = computed(() => {
             <option v-for="year in years" :key="year" :value="year">
               {{ year }}年
             </option></select
-          ><input
+          ><DateTimeField
             v-if="calendarView === 'month'"
             v-model="selectedMonth"
-            type="month"
+            mode="month"
             aria-label="选择月份"
             :max="currentMonth"
           />

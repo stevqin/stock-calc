@@ -1,6 +1,7 @@
 import { mount, flushPromises } from "@vue/test-utils";
 import { beforeEach, afterEach, it, expect, vi } from "vitest";
 import LedgerWorkbench from "./LedgerWorkbench.vue";
+import DateTimeField from "./components/DateTimeField.vue";
 import { manualAccount } from "./sim/record";
 import { marketQuotes } from "./market";
 import { loadAccount, saveAccount } from "./sim/repository";
@@ -437,17 +438,22 @@ it("每次打开交易录入使用打开时刻，自动恢复草稿不恢复旧�
       : undefined,
   );
   await start({ action: "record", initialTab: "trades" });
-  const time = () => wrapper.get('input[type="datetime-local"]');
+  const time = () => wrapper.get('[aria-label="成交发生时间"]');
   expect((time().element as HTMLInputElement).value).toContain(
-    "2026-09-15T12:30",
+    "2026-09-15 12:30",
   );
-  await time().setValue("2026-09-10T09:35");
+  wrapper
+    .findComponent(DateTimeField)
+    .vm.$emit("update:modelValue", "2026-09-10T09:35:00");
+  await wrapper.vm.$nextTick();
   await vi.advanceTimersByTimeAsync(3000);
-  expect((time().element as HTMLInputElement).value).toBe("2026-09-10T09:35");
+  expect((time().element as HTMLInputElement).value).toBe(
+    "2026-09-10 09:35:00",
+  );
   wrapper.unmount();
   vi.setSystemTime(new Date("2026-09-15T05:00:00Z"));
   await start({ action: "record", initialTab: "trades" });
   expect((time().element as HTMLInputElement).value).toContain(
-    "2026-09-15T13:00",
+    "2026-09-15 13:00",
   );
 });

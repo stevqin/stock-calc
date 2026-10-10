@@ -154,7 +154,9 @@ describe("盈亏分析日历", () => {
     "%s 月初在周末时从周一开始，月历只展示五个工作日列",
     async (month, first) => {
       await start();
-      await wrapper.get('[aria-label="选择月份"]').setValue(month);
+      const monthInput = wrapper.get('[aria-label="选择月份"]');
+      await monthInput.setValue(month);
+      await monthInput.trigger("blur");
       const calendar = wrapper.findAll(".pnl-month")[0];
       expect(
         calendar.findAll(".pnl-weekdays span").map((day) => day.text()),
@@ -238,7 +240,9 @@ describe("盈亏分析日历", () => {
       "2025年3月",
       "2025年2月",
     ]);
-    await wrapper.get('[aria-label="选择月份"]').setValue("2025-12");
+    const monthInput = wrapper.get('[aria-label="选择月份"]');
+    await monthInput.setValue("2025-12");
+    await monthInput.trigger("blur");
     expect(wrapper.findAll(".pnl-month h3").map((x) => x.text())).toEqual([
       "2025年12月",
       "2025年11月",
@@ -290,7 +294,9 @@ describe("盈亏分析日历", () => {
   });
   it("闰年二月包含29日，保持十二个独立月历", async () => {
     await start();
-    await wrapper.get('[aria-label="选择月份"]').setValue("2024-02");
+    const monthInput = wrapper.get('[aria-label="选择月份"]');
+    await monthInput.setValue("2024-02");
+    await monthInput.trigger("blur");
     expect(wrapper.findAll(".pnl-month")).toHaveLength(12);
     expect(wrapper.find('[data-date="2024-02-29"]').exists()).toBe(true);
     expect(wrapper.find('[data-date="2024-02-30"]').exists()).toBe(false);

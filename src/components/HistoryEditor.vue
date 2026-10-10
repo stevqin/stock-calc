@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import FloatingNotice from "./FloatingNotice.vue";
+import DateTimeField from "./DateTimeField.vue";
 import { computed, reactive } from "vue";
 import type { Account } from "../sim/model";
 import { localDateTime, fromShanghaiInput } from "../sim/model";
@@ -120,7 +121,10 @@ function submit() {
           :class="{ 'with-direction': trade && trade.kind !== 'opening' }"
         >
           <label
-            >发生时间<input v-model="time.value" type="datetime-local" step="1"
+            >发生时间<DateTimeField
+              v-model="time.value"
+              mode="datetime"
+              aria-label="历史记录发生时间"
           /></label>
           <label v-if="trade && trade.kind !== 'opening'"
             >成交方向<select v-model="tradeForm.kind">

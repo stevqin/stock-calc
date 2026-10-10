@@ -82,14 +82,8 @@ describe("持仓与日收益", () => {
     });
     insertRecord(
       a,
-      draftRecord(
-        a,
-        "sh510300",
-        "sell",
-        "11",
-        "40",
-        "2026-08-28T01:30:00.000Z",
-      ).entry,
+      draftRecord(a, "sh510300", "sell", "11", "40", "2026-08-28T01:30:00.000Z")
+        .entry,
     );
     position = replay(a).positions.sh510300;
     const partial = securityContribution(position, quote);
@@ -98,14 +92,8 @@ describe("持仓与日收益", () => {
     expect(partial?.holding).not.toBe("0.00");
     insertRecord(
       a,
-      draftRecord(
-        a,
-        "sh510300",
-        "sell",
-        "11",
-        "60",
-        "2026-08-28T02:30:00.000Z",
-      ).entry,
+      draftRecord(a, "sh510300", "sell", "11", "60", "2026-08-28T02:30:00.000Z")
+        .entry,
     );
     position = replay(a).positions.sh510300;
     const cleared = securityContribution(position);

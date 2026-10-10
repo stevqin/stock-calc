@@ -34,9 +34,9 @@ describe("持仓下拉面板", () => {
     expect(row.text()).toContain("卫星ETF富国");
     expect(row.get(".current-price").text()).toBe("1.235");
     expect(row.get(".price-change").text()).toBe("+1.20%");
-    expect(
-      wrapper.findAll("tbody tr")[4].get(".current-price").text(),
-    ).toBe("—");
+    expect(wrapper.findAll("tbody tr")[4].get(".current-price").text()).toBe(
+      "—",
+    );
     expect(row.findAll("td")[1].classes()).toContain("up");
     expect(row.findAll("td")[2].get(".profit-amount").classes()).toContain(
       "down",

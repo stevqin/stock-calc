@@ -41,11 +41,7 @@ onBeforeUnmount(close);
           notice.kind === "error" ? "!" : notice.kind === "warning" ? "!" : "✓"
         }}</span>
         <span class="notice-message">{{ notice.message }}</span>
-        <button
-          type="button"
-          class="notice-close"
-          @click="notice.close"
-        >
+        <button type="button" class="notice-close" @click="notice.close">
           ×
         </button>
       </div>

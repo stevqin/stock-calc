@@ -36,13 +36,7 @@ function change(direction: number) {
       ><slot name="label-suffix"
     /></label>
     <div class="step-control">
-      <button
-        type="button"
-        class="step-decrease"
-        @click="change(-1)"
-      >
-        −
-      </button>
+      <button type="button" class="step-decrease" @click="change(-1)">−</button>
       <input
         :id="inputId"
         :value="modelValue"
@@ -54,13 +48,7 @@ function change(direction: number) {
         @keydown.up.prevent="change(1)"
         @keydown.down.prevent="change(-1)"
       />
-      <button
-        type="button"
-        class="step-increase"
-        @click="change(1)"
-      >
-        ＋
-      </button>
+      <button type="button" class="step-increase" @click="change(1)">＋</button>
     </div>
     <slot />
   </div>

@@ -25,22 +25,18 @@ describe("悬浮轻提示", () => {
     await nextTick();
     expect(document.querySelectorAll(".floating-notices")).toHaveLength(1);
     expect(document.querySelectorAll(".floating-notice")).toHaveLength(2);
-    (
-      document.querySelector(".notice-close") as HTMLButtonElement
-    ).click();
+    (document.querySelector(".notice-close") as HTMLButtonElement).click();
     await nextTick();
     expect(document.querySelectorAll(".floating-notices")).toHaveLength(1);
     expect(document.querySelectorAll(".floating-notice")).toHaveLength(1);
-    expect(document.querySelector(".floating-notice.error")?.textContent).toContain(
-      "保存失败",
-    );
+    expect(
+      document.querySelector(".floating-notice.error")?.textContent,
+    ).toContain("保存失败");
   });
   it("手动关闭只隐藏消息，不修改校验状态；相同提醒不重新弹出", async () => {
     const w = start({ message: "待对账", kind: "warning" });
     await nextTick();
-    (
-      document.querySelector(".notice-close") as HTMLButtonElement
-    ).click();
+    (document.querySelector(".notice-close") as HTMLButtonElement).click();
     await nextTick();
     expect(w.props("message")).toBe("待对账");
     await w.setProps({ message: "待对账" });

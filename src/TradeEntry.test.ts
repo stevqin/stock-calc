@@ -128,7 +128,8 @@ describe("先输入再选择买卖", () => {
   it("紧凑布局只有一个成交时间输入，切换费用口径不清空交易字段或实际费用", async () => {
     await start();
     const originalTime = (
-      wrapper.find('[data-testid="trade-time"] input').element as HTMLInputElement
+      wrapper.find('[data-testid="trade-time"] input')
+        .element as HTMLInputElement
     ).value;
     expect(wrapper.findAll('[data-testid="trade-time"]')).toHaveLength(1);
     expect(
@@ -143,11 +144,14 @@ describe("先输入再选择买卖", () => {
       (wrapper.find(".actual-fees input").element as HTMLInputElement).value,
     ).toBe("1.25");
     expect(
-      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement).value,
+      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement)
+        .value,
     ).toBe("10");
     expect(
-      (wrapper.find('[data-testid="trade-time"] input').element as HTMLInputElement)
-        .value,
+      (
+        wrapper.find('[data-testid="trade-time"] input')
+          .element as HTMLInputElement
+      ).value,
     ).toBe(originalTime);
     expect(saveAccount).not.toHaveBeenCalled();
   });
@@ -180,8 +184,10 @@ describe("先输入再选择买卖", () => {
     expect(close.text()).toBe("清仓（全部可卖）");
     await close.trigger("click");
     expect(
-      (wrapper.get('[data-testid="trade-quantity"]').element as HTMLInputElement)
-        .value,
+      (
+        wrapper.get('[data-testid="trade-quantity"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe("1000");
     await wrapper.get('[data-testid="trade-price"]').setValue("11");
     expect(
@@ -264,16 +270,20 @@ describe("先输入再选择买卖", () => {
     await price.setValue("10");
     await wrapper.get(".trade-quantity-increase").trigger("click");
     expect(
-      (wrapper.get('[data-testid="trade-quantity"]').element as HTMLInputElement)
-        .value,
+      (
+        wrapper.get('[data-testid="trade-quantity"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe("200");
     expect(
       wrapper.get('[data-direction="buy"] .trade-cost-preview').text(),
     ).toContain("10.0042");
     await wrapper.get(".trade-quantity-decrease").trigger("click");
     expect(
-      (wrapper.get('[data-testid="trade-quantity"]').element as HTMLInputElement)
-        .value,
+      (
+        wrapper.get('[data-testid="trade-quantity"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe("100");
     await setTradeTime("2026-08-27T10:00:00");
     expect(price.attributes("max")).toBe("1000000");
@@ -288,8 +298,10 @@ describe("先输入再选择买卖", () => {
     );
     await start();
     expect(
-      (wrapper.find('[data-testid="trade-quantity"]').element as HTMLInputElement)
-        .value,
+      (
+        wrapper.find('[data-testid="trade-quantity"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe("200");
     await wrapper.find('[data-testid="trade-price"]').setValue("11");
     await flushPromises();
@@ -314,7 +326,8 @@ describe("先输入再选择买卖", () => {
       wrapper.find(".trade-fields").attributes("disabled"),
     ).toBeUndefined();
     expect(
-      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement).value,
+      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement)
+        .value,
     ).toBe("10");
     await wrapper.find(".submit-order.sell").trigger("click");
     await flushPromises();
@@ -423,7 +436,8 @@ describe("先输入再选择买卖", () => {
     expect(wrapper.findAll(".legacy-trade-drafts button")).toHaveLength(2);
     await wrapper.findAll(".legacy-trade-drafts button")[1].trigger("click");
     expect(
-      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement).value,
+      (wrapper.find('[data-testid="trade-price"]').element as HTMLInputElement)
+        .value,
     ).toBe("11");
     await wrapper.find(".submit-order.buy").trigger("click");
     await flushPromises();

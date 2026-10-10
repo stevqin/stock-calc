@@ -215,11 +215,14 @@ describe("交易台", () => {
     expect(wrapper.find(".history-body > fieldset").exists()).toBe(true);
     expect(wrapper.find(".history-body > .history-impact").exists()).toBe(true);
     expect(
-      wrapper.findAll('.history-time-fields [data-testid="history-record-time"]'),
+      wrapper.findAll(
+        '.history-time-fields [data-testid="history-record-time"]',
+      ),
     ).toHaveLength(1);
     const editor = wrapper.find(".history-editor");
     const originalTime = (
-      editor.find('[data-testid="history-record-time"] input').element as HTMLInputElement
+      editor.find('[data-testid="history-record-time"] input')
+        .element as HTMLInputElement
     ).value;
     await editor.findAll("input")[1].setValue("9.5");
     await editor.find(".actual-fees input").setValue("1.23");

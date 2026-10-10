@@ -451,11 +451,7 @@ onBeforeUnmount(() => {
               }}
             </button>
           </th>
-          <th
-            v-for="c in view.columns"
-            :key="c"
-            :data-column="c"
-          >
+          <th v-for="c in view.columns" :key="c" :data-column="c">
             <button
               class="column-sort"
               :title="

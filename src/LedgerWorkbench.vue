@@ -2367,9 +2367,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             <section class="plan-holding-pnl">
               <div class="plan-result-label">交易后持仓盈亏</div>
               <div class="plan-pnl-values">
-                <strong
-                  :class="tone(forwardResult.holding?.profit)"
-                >
+                <strong :class="tone(forwardResult.holding?.profit)">
                   {{ money(forwardResult.holding?.profit)
                   }}<small v-if="forwardResult.holding?.profit != null"
                     >元</small
@@ -2730,15 +2728,8 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
       class="modal-backdrop"
       @click.self="!saving && (modal = '')"
     >
-      <section
-        class="modal"
-        :class="{ 'history-modal': modal === 'history' }"
-      >
-        <button
-          class="modal-close"
-          :disabled="saving"
-          @click="modal = ''"
-        >
+      <section class="modal" :class="{ 'history-modal': modal === 'history' }">
+        <button class="modal-close" :disabled="saving" @click="modal = ''">
           ×
         </button>
         <HistoryEditor

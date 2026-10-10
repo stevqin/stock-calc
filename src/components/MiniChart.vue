@@ -99,11 +99,7 @@ onBeforeUnmount(() => {
         : marketErrors[key] || '等待可见行行情'
     "
   >
-    <svg
-      v-if="geometry"
-      viewBox="0 0 180 56"
-      preserveAspectRatio="none"
-    >
+    <svg v-if="geometry" viewBox="0 0 180 56" preserveAspectRatio="none">
       <line
         x1="0"
         x2="180"

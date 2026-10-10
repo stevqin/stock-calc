@@ -599,11 +599,7 @@ onBeforeUnmount(() => {
         ><small>含逆回购利息 {{ money(ledger.repoInterest) }}</small>
       </div>
     </section>
-    <div
-      v-if="error || message"
-      class="notice"
-      :class="{ danger: !!error }"
-    >
+    <div v-if="error || message" class="notice" :class="{ danger: !!error }">
       <span>{{ error || message }}</span
       ><button
         class="notice-close"
@@ -1350,14 +1346,8 @@ onBeforeUnmount(() => {
       class="modal-backdrop"
       @click.self="!saving && (modal = '')"
     >
-      <section
-        class="modal"
-      >
-        <button
-          class="modal-close"
-          :disabled="saving"
-          @click="modal = ''"
-        >
+      <section class="modal">
+        <button class="modal-close" :disabled="saving" @click="modal = ''">
           ×
         </button>
         <HistoryEditor

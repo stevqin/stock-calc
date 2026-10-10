@@ -574,10 +574,9 @@ onUnmounted(() => {
             <label v-for="field in feeRows" :key="field.key"
               >{{ field.label }}
               <div>
-                <input
-                  v-model="fees[field.key]"
-                  inputmode="decimal"
-                /><span>{{ field.unit }}</span>
+                <input v-model="fees[field.key]" inputmode="decimal" /><span>{{
+                  field.unit
+                }}</span>
               </div></label
             >
           </div>

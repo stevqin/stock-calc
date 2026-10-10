@@ -854,10 +854,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <dl
-    v-if="snapshot.length && !hideSnapshot"
-    class="chart-snapshot"
-  >
+  <dl v-if="snapshot.length && !hideSnapshot" class="chart-snapshot">
     <div v-for="item in snapshot" :key="item.label">
       <dt>{{ item.label }}</dt>
       <dd :class="item.tone ? `is-${item.tone}` : undefined">

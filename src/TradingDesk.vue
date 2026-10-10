@@ -1782,10 +1782,7 @@ onBeforeUnmount(() => {
             @select="selectSearchHit"
             @clear="clearSearchHit"
           />
-          <div
-            v-if="selectedAddId"
-            class="selected-security"
-          >
+          <div v-if="selectedAddId" class="selected-security">
             <span
               ><strong>{{ add.name }}</strong
               ><small>{{ add.asset === "etf" ? "ETF" : "股票" }}</small></span
@@ -1913,11 +1910,7 @@ onBeforeUnmount(() => {
                 :key="g.id"
                 :class="{ selected: batchGroups.includes(g.id) }"
               >
-                <input
-                  v-model="batchGroups"
-                  type="checkbox"
-                  :value="g.id"
-                />
+                <input v-model="batchGroups" type="checkbox" :value="g.id" />
                 <span>{{ g.name }}</span>
                 <small>{{ g.members.length }}只</small>
               </label>
@@ -2000,10 +1993,7 @@ onBeforeUnmount(() => {
               >
                 ↓</button
               ><span v-if="c === 'chart'" class="auto-column-width">自动</span
-              ><span
-                v-else
-                class="auto-column-width"
-                :data-column-width="c"
+              ><span v-else class="auto-column-width" :data-column-width="c"
                 >{{ defaultColumnWidth(c, activeViewKind) }}px</span
               >
             </div>

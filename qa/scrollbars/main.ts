@@ -34,7 +34,6 @@ createApp(
             {
               ref: area,
               tabindex: 0,
-              "aria-label": "验收滚动区域",
               style:
                 "width:320px;height:220px;overflow:auto;border:1px solid #dfe7f1;background:white",
             },

@@ -278,9 +278,7 @@ describe("重构工作台集成", () => {
       labels.length,
     );
     for (const label of labels)
-      expect(wrapper.find(`[title="查看${label}说明"]`).exists()).toBe(
-        true,
-      );
+      expect(wrapper.find(`[title="查看${label}说明"]`).exists()).toBe(true);
     const cash = wrapper.find('[title="查看账面资金说明"]');
     expect(cash.classes()).not.toContain("open");
     await cash.trigger("click");
@@ -293,9 +291,7 @@ describe("重构工作台集成", () => {
     expect(panel.textContent).toContain("账面资金0.00");
     expect(panel.textContent).toContain("不等于券商显示的可用或可转资金");
     expect(document.querySelector(".summary-help-overlay")).not.toBeNull();
-    (
-      document.querySelector(".summary-help-close") as HTMLElement
-    ).click();
+    (document.querySelector(".summary-help-close") as HTMLElement).click();
     await flushPromises();
     expect(document.querySelector(".summary-help-panel")).toBeNull();
   });
@@ -369,16 +365,18 @@ describe("重构工作台集成", () => {
     expect(wrapper.find(".auto-column-width").text()).toBe("自动");
     expect(wrapper.find(".column-order input").exists()).toBe(false);
     expect(wrapper.find('[data-column-width="flow"]').text()).toBe("104px");
-    expect(wrapper.find('[data-column-width="marketValue"]').exists()).toBe(false);
-    expect(wrapper.find('[data-column-width="cyclePnl"]').exists()).toBe(
+    expect(wrapper.find('[data-column-width="marketValue"]').exists()).toBe(
       false,
     );
+    expect(wrapper.find('[data-column-width="cyclePnl"]').exists()).toBe(false);
     await wrapper.find(".dialog-close").trigger("click");
     await button("我的持仓 0").trigger("click");
     vi.mocked(saveAccount).mockClear();
     await button("设置列").trigger("click");
     expect(wrapper.find('[data-column-width="flow"]').text()).toBe("95px");
-    expect(wrapper.find('[data-column-width="marketValue"]').text()).toBe("96px");
+    expect(wrapper.find('[data-column-width="marketValue"]').text()).toBe(
+      "96px",
+    );
     expect(wrapper.find('[data-column-width="cyclePnl"]').text()).toBe("93px");
     expect(wrapper.find('[title="拖动排序：走势"]').exists()).toBe(true);
     expect(saveAccount).not.toHaveBeenCalled();
@@ -425,9 +423,9 @@ describe("重构工作台集成", () => {
     expect(button("亏损 1")).toBeTruthy();
     await button("盈利 1").trigger("click");
     await flushPromises();
-    expect(wrapper.find(".view-tabs").find('[title]').attributes("title")).toContain(
-      "历史卖出盈亏",
-    );
+    expect(
+      wrapper.find(".view-tabs").find("[title]").attributes("title"),
+    ).toContain("历史卖出盈亏");
     let table = wrapper.findComponent(SecuritiesTable);
     expect(table.props("variant")).toBe("contribution");
     expect(
@@ -761,10 +759,9 @@ describe("重构工作台集成", () => {
     await button("取消").trigger("click");
     expect(saveAccount).not.toHaveBeenCalled();
     await open();
-    expect(
-      (groupCheckbox("关注").element as HTMLInputElement)
-        .checked,
-    ).toBe(false);
+    expect((groupCheckbox("关注").element as HTMLInputElement).checked).toBe(
+      false,
+    );
     await groupCheckbox("关注").setValue(true);
     await groupCheckbox("关注").setValue(false);
     await wrapper.find(".desk-dialog form").trigger("submit");
@@ -784,10 +781,9 @@ describe("重构工作台集成", () => {
     await wrapper.find(".desk-dialog form").trigger("submit");
     await flushPromises();
     expect(stored.workspace!.groups[0].members).toEqual([]);
-    expect(
-      (groupCheckbox("关注").element as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect((groupCheckbox("关注").element as HTMLInputElement).checked).toBe(
+      true,
+    );
   });
   it("分组右键移出只影响该分组，重排保留其他分组顺序", async () => {
     const ids = stored.securities.map((s) => s.id);
@@ -819,9 +815,7 @@ describe("重构工作台集成", () => {
       id = stored.securities[1].id;
     table.vm.$emit("context", { id, x: 20, y: 200 });
     await flushPromises();
-    await wrapper
-      .find(".security-filter")
-      .setValue(stored.securities[0].name);
+    await wrapper.find(".security-filter").setValue(stored.securities[0].name);
     expect(wrapper.find(".row-context-menu").exists()).toBe(false);
     expect(table.props("checked")).toEqual([]);
     await wrapper.find(".security-filter").setValue("");
@@ -836,7 +830,9 @@ describe("重构工作台集成", () => {
       stored.securities[1].name,
     );
     expect(wrapper.find(".entry-dialog h2").text()).toContain("录入成交");
-    expect(document.activeElement?.getAttribute("data-testid")).toBe("trade-price");
+    expect(document.activeElement?.getAttribute("data-testid")).toBe(
+      "trade-price",
+    );
     expect(wrapper.findAll(".submit-order").map((b) => b.text())).toEqual([
       "买入",
       "卖出",
@@ -858,7 +854,9 @@ describe("重构工作台集成", () => {
     expect(wrapper.find(".desk-market-body").classes()).not.toContain(
       "with-drawer",
     );
-    expect(document.activeElement?.classList.contains("security-drawer-close")).toBe(true);
+    expect(
+      document.activeElement?.classList.contains("security-drawer-close"),
+    ).toBe(true);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await flushPromises();
     expect(wrapper.find(".security-drawer").exists()).toBe(false);

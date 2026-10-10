@@ -69,7 +69,9 @@ describe("计算器界面", () => {
   });
   it("股票ETF费率独立，持仓成本按净利润变化", async () => {
     wrapper = mount(App);
-    await wrapper.get(".holding-inputs label:first-child input").setValue("1000");
+    await wrapper
+      .get(".holding-inputs label:first-child input")
+      .setValue("1000");
     await wrapper.get(".holding-inputs label:last-child input").setValue("10");
     expect(wrapper.find(".holding-result").text()).toContain("9.9995");
     await wrapper.get(".asset-tabs button:last-child").trigger("click");

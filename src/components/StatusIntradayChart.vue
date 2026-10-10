@@ -105,11 +105,7 @@ onBeforeUnmount(() => clearInterval(timer));
       </div>
       <time>{{ quoteTime || (data ? "已更新" : "等待行情") }}</time>
     </header>
-    <svg
-      v-if="geometry"
-      viewBox="0 0 276 124"
-      preserveAspectRatio="none"
-    >
+    <svg v-if="geometry" viewBox="0 0 276 124" preserveAspectRatio="none">
       <line class="chart-grid" x1="7" x2="269" y1="43" y2="43" />
       <line class="chart-grid" x1="7" x2="269" y1="75" y2="75" />
       <line

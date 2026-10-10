@@ -24,9 +24,7 @@ function step(delta: number) {
 <template>
   <label class="field-label" :for="id">{{ label }} <span>元</span></label>
   <div class="price-field">
-    <button type="button" class="price-decrease" @click="step(-1)">
-      −
-    </button>
+    <button type="button" class="price-decrease" @click="step(-1)">−</button>
     <input
       :id="id"
       :value="modelValue"
@@ -38,8 +36,6 @@ function step(delta: number) {
       @keydown.up.prevent="step(1)"
       @keydown.down.prevent="step(-1)"
     />
-    <button type="button" class="price-increase" @click="step(1)">
-      ＋
-    </button>
+    <button type="button" class="price-increase" @click="step(1)">＋</button>
   </div>
 </template>

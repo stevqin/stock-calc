@@ -76,7 +76,9 @@ const field = (name: string) =>
 const input = (name: string) => field(name).find("input");
 const value = (name: string) => (input(name).element as HTMLInputElement).value;
 const plannerTab = (name: string) =>
-  wrapper.findAll(".planner-mode-tabs button").find((item) => item.text() === name)!;
+  wrapper
+    .findAll(".planner-mode-tabs button")
+    .find((item) => item.text() === name)!;
 it("正算与反推通过页签切换，同一时间只显示一套输入和结果", async () => {
   await start();
   const tabs = wrapper.findAll(".planner-mode-tabs button");
@@ -91,10 +93,7 @@ it("正算与反推通过页签切换，同一时间只显示一套输入和结�
       .exists(),
   ).toBe(true);
   expect(
-    wrapper
-      .find(".planner-forward")
-      .find(".planner-reverse")
-      .exists(),
+    wrapper.find(".planner-forward").find(".planner-reverse").exists(),
   ).toBe(false);
   expect(wrapper.find(".planner-reverse").exists()).toBe(false);
   expect(input("买入价").exists()).toBe(true);

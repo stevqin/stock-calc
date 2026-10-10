@@ -34,7 +34,7 @@ Files: 新建 src/sim/analysis.ts、src/sim/analysis.test.ts。
 
 Interface: `analyzeAccount(account, barsById, quotes, today)` 返回逐日数据和完整轮次；`summarizeAnalysis(analysis, start, end)` 返回区间汇总及贡献；`monthSequence(month)` 返回前二月及当前月字符串。
 
-- [x] 用手算数据写失败测试：100份10元买入含费1001，11元全部卖出净收1099，总收益98；日间涨跌和已实现部分不重复计算。
+- [x] 用手算数据写失败测试：100份10元买入含费1001，11元全部卖出净收1099，总收益98；日间涨跌和卖出盈亏不重复计算。
 - [x] 覆盖入金排除、利息收入、FIFO部分卖出、同日清仓再买、跨年三个月、闰年、缺价和期初快照。
 - [x] 运行 `npm test -- src/sim/analysis.test.ts`，然后实现 Decimal 每日重放及轮次汇总。
 - [x] 重跑测试，检查区间期初边界及零样本。

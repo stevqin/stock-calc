@@ -501,3 +501,50 @@ it("历史成交按完整日期范围筛选，支持单边、叠加证券筛选�
   expect(rows()).toBe(1);
   expect(saveAccount).not.toHaveBeenCalled();
 });
+
+it("历史成交可切换为合并资金流水的对账时间线并聚焦负余额区间", async () => {
+  const account = manualAccount();
+  const security = account.securities[0];
+  account.cashEntries!.push(
+    draftCash("deposit", "1000", "2026-08-25T01:00:00.000Z", "转入"),
+    draftCash("deposit", "20", "2026-08-25T03:00:00.000Z", "补足"),
+  );
+  insertRecord(
+    account,
+    draftRecord(
+      account,
+      security.id,
+      "buy",
+      "10",
+      "102",
+      "2026-08-25T02:00:00.000Z",
+      "买入",
+      { commission: "0", stamp: "0", transfer: "0" },
+    ).entry,
+  );
+  wrapper = mount(Workspace, {
+    props: {
+      embedded: true,
+      initialTab: "trades",
+      snapshot: { account, revision: 1 },
+    },
+    global: { stubs: { MarketChart: true } },
+  });
+  await flushPromises();
+  await wrapper.get(".history-mode-tabs button:nth-child(2)").trigger("click");
+  const rows = wrapper.findAll(".reconcile-table tbody tr");
+  expect(rows).toHaveLength(3);
+  expect(rows.map((row) => row.find(".reconcile-balance").text())).toEqual([
+    "1,000.00",
+    "-20.00",
+    "0.00",
+  ]);
+  expect(rows[1].classes()).toContain("reconcile-negative");
+  expect(rows[1].text()).toContain("开始为负");
+  expect(rows[2].text()).toContain("恢复为正");
+  expect(wrapper.find(".reconcile-summary").text()).toContain("1 段");
+  expect(wrapper.find(".reconcile-summary").text()).toContain("-20.00");
+  expect(
+    wrapper.findAll('.reconcile-table button[aria-label^="修改"]'),
+  ).toHaveLength(3);
+});

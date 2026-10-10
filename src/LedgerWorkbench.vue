@@ -34,6 +34,7 @@ import {
   type Account,
   type Security,
   type CashEntry,
+  type Entry,
 } from "./sim/model";
 import {
   manualAccount,
@@ -50,6 +51,7 @@ import { readDraft, writeDraft, flushDrafts } from "./sim/drafts";
 import { upgradeWorkspace, addToWatchlist } from "./sim/workspaceState";
 import { marketQuotes } from "./market";
 import { tradeLabels } from "./sim/tradeLabels";
+import { cashTimeline, type CashTimelineRow } from "./sim/reconciliation";
 const props = defineProps<{
   embedded?: boolean;
   initialTab?: string;
@@ -103,6 +105,8 @@ const tradeTypeLabels = computed(() => tradeLabels(account.value.entries));
 const historyFilterId = ref("");
 const historyStart = ref("");
 const historyEnd = ref("");
+const historyMode = ref<"records" | "reconcile">("records");
+const historyIssuesOnly = ref(true);
 function historyFilterTime(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return NaN;
   const time = new Date(`${value}T00:00:00+08:00`);
@@ -159,6 +163,56 @@ const tradeRows = computed(() =>
     .slice()
     .reverse(),
 );
+const reconciliationRows = computed(() => cashTimeline(account.value));
+const reconciliationSummary = computed(() => {
+  const rows = reconciliationRows.value;
+  const minimum = rows.reduce(
+    (value, row) => Decimal.min(value, row.balance),
+    new Decimal(account.value.initialCash),
+  );
+  return {
+    episodes: rows.filter((row) => row.startsNegative).length,
+    checkpoints: rows.filter((row) => row.negative).length,
+    minimum: minimum.toFixed(2),
+    current:
+      rows.at(-1)?.balance ?? new Decimal(account.value.initialCash).toFixed(2),
+  };
+});
+const reconciliationIssueIndexes = computed(() => {
+  const indexes = new Set<number>();
+  reconciliationRows.value.forEach((row, index) => {
+    if (!row.negative) return;
+    if (index > 0) indexes.add(index - 1);
+    indexes.add(index);
+    if (reconciliationRows.value[index + 1]?.recovers) indexes.add(index + 1);
+  });
+  return indexes;
+});
+const visibleReconciliationRows = computed(() =>
+  reconciliationRows.value.filter((row, index) => {
+    const bounds = historyBounds.value;
+    if (bounds.invalid) return false;
+    const time = Date.parse(row.time);
+    const inRange = time >= bounds.start && time <= bounds.end;
+    return (
+      inRange &&
+      (!historyIssuesOnly.value || reconciliationIssueIndexes.value.has(index))
+    );
+  }),
+);
+function setHistoryMode(mode: "records" | "reconcile") {
+  historyMode.value = mode;
+  if (mode === "reconcile" && historyFilterId.value) {
+    historyFilterId.value = "";
+    historySearchKey.value += 1;
+  }
+}
+function reconciliationTrade(row: CashTimelineRow) {
+  return row.scope === "trade" ? (row.record as Entry) : undefined;
+}
+function reconciliationCash(row: CashTimelineRow) {
+  return row.scope === "cash" ? (row.record as CashEntry) : undefined;
+}
 function openHistory(
   scope: HistoryTarget["scope"],
   id: string,
@@ -1784,12 +1838,39 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
         </p>
       </div>
       <div v-else-if="tab === 'trades'" class="table-scroll">
+        <nav
+          v-if="!historyReadOnly"
+          class="history-mode-tabs"
+          aria-label="历史成交查看方式"
+        >
+          <button
+            type="button"
+            :aria-current="historyMode === 'records' ? 'page' : undefined"
+            @click="setHistoryMode('records')"
+          >
+            成交记录
+          </button>
+          <button
+            type="button"
+            :aria-current="historyMode === 'reconcile' ? 'page' : undefined"
+            @click="setHistoryMode('reconcile')"
+          >
+            对账时间线
+            <small v-if="reconciliationSummary.episodes">
+              {{ reconciliationSummary.episodes }}段异常
+            </small>
+          </button>
+          <span>成交与资金流水按发生时间合并</span>
+        </nav>
         <div
           class="history-search-toolbar"
-          :class="{ 'history-search-toolbar-scoped': historySecurityId }"
+          :class="{
+            'history-search-toolbar-scoped':
+              historySecurityId || historyMode === 'reconcile',
+          }"
         >
           <SecuritySearch
-            v-if="!historySecurityId"
+            v-if="!historySecurityId && historyMode === 'records'"
             compact
             :key="historySearchKey"
             :securities="historySecurities"
@@ -1816,7 +1897,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               :aria-invalid="historyBounds.invalid"
             />
           </div>
-          <div class="history-filter-result">
+          <div v-if="historyMode === 'records'" class="history-filter-result">
             <span class="history-selection-name">{{
               historyFilterSecurity?.name
             }}</span>
@@ -1837,7 +1918,36 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
         >
           开始日期时间不能晚于结束日期时间，请调整筛选范围。
         </p>
+        <section
+          v-if="historyMode === 'reconcile' && !historyReadOnly"
+          class="reconcile-summary"
+          aria-label="历史资金对账摘要"
+        >
+          <div>
+            <span>负余额区间</span>
+            <b>{{ reconciliationSummary.episodes }} 段</b>
+          </div>
+          <div>
+            <span>负余额检查点</span>
+            <b>{{ reconciliationSummary.checkpoints }} 笔</b>
+          </div>
+          <div>
+            <span>历史最低</span>
+            <b :class="{ loss: Number(reconciliationSummary.minimum) < 0 }">
+              {{ money(reconciliationSummary.minimum) }}
+            </b>
+          </div>
+          <div>
+            <span>当前账面资金</span>
+            <b>{{ money(reconciliationSummary.current) }}</b>
+          </div>
+          <label>
+            <input v-model="historyIssuesOnly" type="checkbox" />
+            只看异常前后
+          </label>
+        </section>
         <table
+          v-if="historyMode === 'records' || historyReadOnly"
           class="ledger-history-table trade-history-table"
           :class="{ 'compact-history': historyCompact }"
         >
@@ -1949,13 +2059,134 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             </tr>
           </tbody>
         </table>
-        <p v-if="!tradeRows.length" class="empty">
+        <p
+          v-if="
+            (historyMode === 'records' || historyReadOnly) && !tradeRows.length
+          "
+          class="empty"
+        >
           {{
             effectiveHistorySecurityId ? "该证券暂无交易记录" : "暂无成交记录"
           }}
         </p>
+        <table
+          v-if="historyMode === 'reconcile' && !historyReadOnly"
+          class="ledger-history-table reconcile-table"
+        >
+          <colgroup>
+            <col style="width: 142px" />
+            <col style="width: 94px" />
+            <col />
+            <col style="width: 120px" />
+            <col style="width: 128px" />
+            <col style="width: 88px" />
+            <col style="width: 72px" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>发生时间</th>
+              <th>记录类型</th>
+              <th>内容</th>
+              <th>资金变动</th>
+              <th>变动后资金</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in visibleReconciliationRows"
+              :key="row.scope + ':' + row.id"
+              :class="{
+                'reconcile-negative': row.negative,
+                'reconcile-start': row.startsNegative,
+                'reconcile-recovered': row.recovers,
+              }"
+            >
+              <td class="reconcile-time">
+                <span>{{ row.date }}</span>
+                <small>{{
+                  new Date(row.time).toLocaleTimeString("zh-CN", {
+                    timeZone: "Asia/Shanghai",
+                    hour12: false,
+                  })
+                }}</small>
+              </td>
+              <td>
+                {{
+                  row.scope === "cash"
+                    ? cashLabels[reconciliationCash(row)!.kind]
+                    : tradeTypeLabels[row.id]
+                }}
+              </td>
+              <td class="reconcile-content">
+                <template v-if="reconciliationTrade(row)">
+                  <b>{{
+                    account.securities.find(
+                      (security) =>
+                        security.id === reconciliationTrade(row)!.securityId,
+                    )?.name
+                  }}</b>
+                  <small>
+                    {{ reconciliationTrade(row)!.securityId }} ·
+                    {{ reconciliationTrade(row)!.quantity }}股/份 ×
+                    {{ reconciliationTrade(row)!.price }}元
+                  </small>
+                </template>
+                <template v-else>
+                  <b>{{ reconciliationCash(row)!.note || "无备注" }}</b>
+                  <small>{{ reconciliationCash(row)!.amount }}元</small>
+                </template>
+              </td>
+              <td :class="Number(row.delta) >= 0 ? 'gain' : 'loss'">
+                {{ Number(row.delta) > 0 ? "+" : "" }}{{ money(row.delta) }}
+              </td>
+              <td class="reconcile-balance" :class="{ loss: row.negative }">
+                {{ money(row.balance) }}
+              </td>
+              <td class="reconcile-status">
+                <strong v-if="row.startsNegative">开始为负</strong>
+                <strong v-else-if="row.recovers">恢复为正</strong>
+                <span v-else-if="row.negative">仍为负</span>
+                <span v-else>正常</span>
+              </td>
+              <td class="record-actions">
+                <button
+                  type="button"
+                  class="text-button"
+                  :aria-label="
+                    '修改' + (row.scope === 'trade' ? '成交' : '资金流水')
+                  "
+                  :disabled="saving"
+                  @click="openHistory(row.scope, row.id, 'edit')"
+                >
+                  修改
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p
+          v-if="
+            historyMode === 'reconcile' &&
+            !historyReadOnly &&
+            !visibleReconciliationRows.length
+          "
+          class="empty"
+        >
+          {{
+            historyIssuesOnly
+              ? "所选范围内没有负余额记录"
+              : "所选范围内没有可对账记录"
+          }}
+        </p>
         <p v-if="!historyReadOnly" class="footnote">
-          修改、删除前预览全账本重算结果。估算费用使用该记录保存的历史费率，实际费用按交割单填写；时间相同时保留原记录顺序。
+          <template v-if="historyMode === 'records'">
+            修改、删除前预览全账本重算结果。估算费用使用该记录保存的历史费率，实际费用按交割单填写；时间相同时保留原记录顺序。
+          </template>
+          <template v-else>
+            时间线按时间正序排列；同一时刻先计入资金流水，再处理成交。红色区域表示该笔完成后账面资金为负，修改记录前请先核对交割单与银证转账时间。
+          </template>
         </p>
       </div>
       <div v-else-if="tab === 'planner' && security" class="planner">

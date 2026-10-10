@@ -1837,7 +1837,11 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           国债逆回购只录入已到账净利息，不填本金返还；暂不追踪逆回购本金的冻结与到期释放，因此账面余额不等于券商可取资金。
         </p>
       </div>
-      <div v-else-if="tab === 'trades'" class="table-scroll">
+      <div
+        v-else-if="tab === 'trades'"
+        class="table-scroll"
+        :class="{ 'history-with-mode-tabs': !historyReadOnly }"
+      >
         <nav
           v-if="!historyReadOnly"
           class="history-mode-tabs"

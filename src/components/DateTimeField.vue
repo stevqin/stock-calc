@@ -10,7 +10,7 @@ const props = withDefaults(
   defineProps<{
     modelValue: string;
     mode?: FieldMode;
-    ariaLabel?: string;
+    testId?: string;
     placeholder?: string;
     min?: string;
     max?: string;
@@ -20,7 +20,7 @@ const props = withDefaults(
   }>(),
   {
     mode: "date",
-    ariaLabel: "选择日期",
+    testId: undefined,
     placeholder: "请选择",
     min: undefined,
     max: undefined,
@@ -77,11 +77,7 @@ function update(value: unknown) {
     :max-date="max || undefined"
     :disabled="disabled"
     :placeholder="placeholder"
-    :aria-labels="{
-      input: ariaLabel,
-      clearInput: '清除日期',
-      calendarIcon: '打开日历',
-    }"
+    :data-testid="testId"
     :auto-apply="mode !== 'datetime'"
     :text-input="{
       format: textInputFormat,
@@ -95,7 +91,6 @@ function update(value: unknown) {
       alwaysClearable: false,
       hideInputIcon: compact,
       autocomplete: 'off',
-      state: invalid ? false : undefined,
     }"
     :action-row="{
       showPreview: mode === 'datetime',
@@ -115,7 +110,7 @@ function update(value: unknown) {
     :class="[
       'date-time-field',
       `date-time-field--${mode}`,
-      { 'date-time-field--compact': compact },
+      { 'date-time-field--compact': compact, invalid },
     ]"
     @update:model-value="update"
   />

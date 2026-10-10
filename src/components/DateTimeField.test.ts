@@ -4,12 +4,12 @@ import { VueDatePicker } from "@vuepic/vue-datepicker";
 import DateTimeField from "./DateTimeField.vue";
 
 describe("DateTimeField", () => {
-  it("把可访问名称、占位文字和错误状态交给实际输入框", () => {
+  it("把测试定位、占位文字和错误状态交给日期控件", () => {
     const wrapper = mount(DateTimeField, {
       props: {
         modelValue: "",
         mode: "date",
-        ariaLabel: "开始日期",
+        testId: "start-date",
         placeholder: "开始日期",
         invalid: true,
         compact: true,
@@ -17,9 +17,10 @@ describe("DateTimeField", () => {
     });
 
     const input = wrapper.get("input");
-    expect(input.attributes("aria-label")).toBe("开始日期");
     expect(input.attributes("placeholder")).toBe("开始日期");
-    expect(input.attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get('[data-testid="start-date"]').classes()).toContain(
+      "invalid",
+    );
     const picker = wrapper.findComponent(VueDatePicker);
     expect(picker.props("inputAttrs")).toMatchObject({
       clearable: true,

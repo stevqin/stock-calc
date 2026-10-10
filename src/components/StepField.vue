@@ -38,14 +38,13 @@ function change(direction: number) {
     <div class="step-control">
       <button
         type="button"
-        :aria-label="`${label}减少${step}`"
+        class="step-decrease"
         @click="change(-1)"
       >
         −
       </button>
       <input
         :id="inputId"
-        :aria-label="label"
         :value="modelValue"
         inputmode="decimal"
         autocomplete="off"
@@ -57,7 +56,7 @@ function change(direction: number) {
       />
       <button
         type="button"
-        :aria-label="`${label}增加${step}`"
+        class="step-increase"
         @click="change(1)"
       >
         ＋

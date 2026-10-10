@@ -128,7 +128,7 @@ async function keys(event: KeyboardEvent) {
           hits.value.length;
     await nextTick();
     root.value
-      ?.querySelector('[aria-selected="true"]')
+      ?.querySelector(".search-candidates li.active")
       ?.scrollIntoView?.({ block: "nearest" });
   } else if (event.key === "Escape" && expanded.value) {
     event.preventDefault();
@@ -150,20 +150,10 @@ async function keys(event: KeyboardEvent) {
     <input
       :id="id"
       v-model="query"
-      role="combobox"
       autocomplete="off"
       spellcheck="false"
       placeholder="名称 / 全拼 / 拼音简称 / 代码"
       maxlength="64"
-      :aria-expanded="expanded"
-      :aria-controls="`${id}-results`"
-      aria-autocomplete="list"
-      :aria-activedescendant="
-        expanded && active >= 0 && hits[active]
-          ? `${id}-${searchId(hits[active])}`
-          : undefined
-      "
-      :aria-describedby="`${id}-help`"
       @compositionstart="composing = true"
       @compositionend="composing = false"
       @keydown="keys"
@@ -171,18 +161,12 @@ async function keys(event: KeyboardEvent) {
     />
     <small :id="`${id}-help`">如：贵州茅台 / guizhoumaotai / gzmt / 6005</small>
     <div v-if="expanded" class="search-candidates">
-      <ul
-        :id="`${id}-results`"
-        role="listbox"
-        aria-label="证券搜索结果"
-        :aria-busy="pending"
-      >
+      <ul :id="`${id}-results`">
         <li
           v-for="(hit, index) in hits"
           :id="`${id}-${searchId(hit)}`"
           :key="searchId(hit)"
-          role="option"
-          :aria-selected="index === active"
+          :class="{ active: index === active }"
           @mousedown.prevent
           @click="choose(hit)"
           @mouseenter="active = index"
@@ -196,7 +180,7 @@ async function keys(event: KeyboardEvent) {
           >
         </li>
       </ul>
-      <div class="search-status" role="status">
+      <div class="search-status">
         <span v-if="pending">正在搜索…</span>
         <span v-else-if="!hits.length && !composing"
           >未找到匹配证券，请更换名称、拼音或代码重试。</span
@@ -239,7 +223,7 @@ async function keys(event: KeyboardEvent) {
   cursor: pointer;
   border-bottom: 1px solid #eef2f7;
 }
-.search-candidates li[aria-selected="true"] {
+.search-candidates li.active {
   background: #eaf1ff;
   box-shadow: inset 3px 0 var(--ui-action);
 }

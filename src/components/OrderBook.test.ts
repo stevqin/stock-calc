@@ -48,6 +48,7 @@ it("手额切换使用各档价格乘手数乘100，更新报价后重算并保�
   const buy = () => w.findAll(".book-row")[5].get(".book-volume").text();
   expect(buy()).toBe("300");
   await w.get("button[title]").trigger("click");
+  expect(w.get("button[title]").classes()).toContain("active");
   expect(buy()).toBe("10.2万元");
   expect(w.findAll(".book-row")[4].get(".book-volume").text()).toBe("0元");
   expect(w.findAll(".book-row")[0].get(".book-volume").text()).toBe("—");
@@ -58,6 +59,7 @@ it("手额切换使用各档价格乘手数乘100，更新报价后重算并保�
   });
   expect(buy()).toBe("10.5万元");
   await w.get(".book-unit button").trigger("click");
+  expect(w.get(".book-unit button").classes()).toContain("active");
   expect(buy()).toBe("300");
   w.unmount();
 });

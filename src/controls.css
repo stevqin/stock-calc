@@ -149,11 +149,13 @@ button:hover:not(:disabled) {
   box-shadow: var(--ui-focus-ring);
   caret-color: var(--ui-action);
 }
-:is(input, select, textarea)[aria-invalid="true"]:focus {
+:is(input, select, textarea).invalid:focus,
+.invalid :is(input, select, textarea):focus {
   border-color: #b13342;
   box-shadow: 0 0 0 3px rgba(177, 51, 66, 0.12);
 }
-:is(input, select, textarea)[aria-invalid="true"] {
+:is(input, select, textarea).invalid,
+.invalid :is(input, select, textarea) {
   border-color: #b13342;
   background-color: #fff8f8;
 }

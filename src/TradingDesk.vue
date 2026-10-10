@@ -1390,13 +1390,13 @@ onBeforeUnmount(() => {
             我的持仓 <small>{{ holdingIds.length }}</small></button
           ><button
             :class="{ active: w.activeView === 'profit' }"
-            title="累计收益贡献大于0；包含历史已实现收益和当前持仓浮盈亏"
+            title="累计收益贡献大于0；包含历史卖出盈亏和当前持仓浮盈亏"
             @click="switchView('profit')"
           >
             盈利 <small>{{ contributionStats.profitIds.length }}</small></button
           ><button
             :class="{ active: w.activeView === 'loss' }"
-            title="累计收益贡献小于0；包含历史已实现亏损和当前持仓浮盈亏"
+            title="累计收益贡献小于0；包含历史卖出盈亏和当前持仓浮盈亏"
             @click="switchView('loss')"
           >
             亏损 <small>{{ contributionStats.lossIds.length }}</small></button
@@ -1580,7 +1580,7 @@ onBeforeUnmount(() => {
                     </dd>
                   </div>
                   <div>
-                    <dt>累计FIFO已实现</dt>
+                    <dt>累计卖出盈亏（FIFO）</dt>
                     <dd>{{ money(ledger.positions[selected]?.realized) }}</dd>
                   </div>
                 </dl>

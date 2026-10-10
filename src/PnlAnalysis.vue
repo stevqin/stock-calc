@@ -535,11 +535,14 @@ const chart = computed(() => {
           ><small>含持仓涨跌及利息等收入，已扣交易费用</small>
         </div>
         <div class="pnl-metric">
-          <span>已实现盈亏</span
+          <span>区间卖出盈亏</span
           ><strong :class="tone(summary.realized)">{{
             money(hasRecords ? summary.realized : null, true)
           }}</strong
-          ><small>按卖出对应的持仓成本计算</small>
+          ><small
+            >卖出盈亏＝卖出净收入−按 FIFO
+            匹配的买入成本，包含部分卖出和已经清仓的交易。</small
+          >
         </div>
         <div class="pnl-metric">
           <span>浮动盈亏变化</span
@@ -592,7 +595,7 @@ const chart = computed(() => {
         <summary>
           所选区间有 {{ summary.missingDays }} 日缺少收益基准，查看缺失日期
         </summary>
-        <p>完整总盈亏暂不可用；已实现盈亏和手续费仍按账本展示。</p>
+        <p>完整总盈亏暂不可用；区间卖出盈亏和手续费仍按账本展示。</p>
         <button :disabled="loading" @click="retryToken++">补充历史行情</button>
         <ul>
           <li v-for="item in missingRanges" :key="item.start">
@@ -661,7 +664,7 @@ const chart = computed(() => {
                 <tr>
                   <th>证券</th>
                   <th>区间盈亏</th>
-                  <th>已实现</th>
+                  <th>区间卖出盈亏</th>
                 </tr>
               </thead>
               <tbody>
@@ -876,7 +879,7 @@ const chart = computed(() => {
             <tr>
               <th>证券</th>
               <th>当日盈亏</th>
-              <th>已实现盈亏</th>
+              <th>当日卖出盈亏</th>
               <th>手续费</th>
             </tr>
           </thead>

@@ -420,6 +420,9 @@ describe("重构工作台集成", () => {
     expect(button("亏损 1")).toBeTruthy();
     await button("盈利 1").trigger("click");
     await flushPromises();
+    expect(wrapper.find(".view-tabs").find('[title]').attributes("title")).toContain(
+      "历史卖出盈亏",
+    );
     let table = wrapper.findComponent(SecuritiesTable);
     expect(table.props("variant")).toBe("contribution");
     expect(

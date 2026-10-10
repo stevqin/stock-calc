@@ -130,12 +130,14 @@ describe("盈亏分析日历", () => {
     );
     wrapper = mount(PnlAnalysis, { props: { account, today: "2026-01-15" } });
     await flushPromises();
+    expect(wrapper.text()).toContain("区间卖出盈亏");
     expect(wrapper.get('[aria-label="区间盈亏率"]').text()).toBe("+29.87%");
     expect(wrapper.findAll(".pnl-month-return")[0].text()).toBe("+29.87%");
     expect(wrapper.get('[data-date="2026-01-13"] .pnl-day-return').text()).toBe(
       "+10.00%",
     );
     await wrapper.get('[data-date="2026-01-13"]').trigger("click");
+    expect(wrapper.get(".pnl-day-detail").text()).toContain("当日卖出盈亏");
     expect(wrapper.get('[aria-label="当日盈亏率"]').text()).toBe("+10.00%");
     await wrapper.get('[aria-label="关闭收益明细"]').trigger("click");
     await button("年").trigger("click");

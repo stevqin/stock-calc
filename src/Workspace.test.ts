@@ -302,6 +302,10 @@ describe("交易台", () => {
   });
   it("资金记录可以修改类型和金额，再确认删除", async () => {
     await startHistory();
+    expect(wrapper.find(".account-strip").text()).toContain(
+      "累计卖出盈亏（FIFO）",
+    );
+    expect(wrapper.text()).toContain("历史卖出盈亏");
     await button("资金流水").trigger("click");
     expect(
       wrapper

@@ -72,7 +72,7 @@ function account() {
   return a;
 }
 describe("持仓与日收益", () => {
-  it("累计收益贡献由历史已实现与剩余持仓浮盈亏组成，清仓后仍保留", () => {
+  it("累计收益贡献由历史卖出盈亏与剩余持仓浮盈亏组成，部分卖出和清仓后均保留", () => {
     const a = account();
     let position = replay(a).positions.sh510300;
     expect(securityContribution(position, quote)).toMatchObject({
@@ -87,8 +87,24 @@ describe("持仓与日收益", () => {
         "sh510300",
         "sell",
         "11",
-        "100",
+        "40",
         "2026-08-28T01:30:00.000Z",
+      ).entry,
+    );
+    position = replay(a).positions.sh510300;
+    const partial = securityContribution(position, quote);
+    expect(position.quantity).toBe("60");
+    expect(partial?.realized).not.toBe("0.00");
+    expect(partial?.holding).not.toBe("0.00");
+    insertRecord(
+      a,
+      draftRecord(
+        a,
+        "sh510300",
+        "sell",
+        "11",
+        "60",
+        "2026-08-28T02:30:00.000Z",
       ).entry,
     );
     position = replay(a).positions.sh510300;

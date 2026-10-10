@@ -405,9 +405,11 @@ describe("双行证券指标", () => {
   it("收益贡献视图隐藏持仓成本，并显示累计、历史、当前和组内占比", async () => {
     await start();
     const id = manualAccount().securities[0].id;
+    const view = defaultView("profit");
+    view.columns = [...view.columns, "realizedContribution"];
     await wrapper.setProps({
       variant: "contribution",
-      view: defaultView("profit"),
+      view,
       contributions: {
         [id]: {
           total: "120.50",
@@ -418,6 +420,7 @@ describe("双行证券指标", () => {
       },
     });
     expect(wrapper.find('[aria-label="持仓成本单价"]').exists()).toBe(false);
+    expect(wrapper.find("thead").text()).toContain("历史卖出盈亏");
     expect(wrapper.find(".cost-secondary").exists()).toBe(false);
     expect(wrapper.findAll("col")[1].attributes("style")).toContain("90px");
     expect(
@@ -429,6 +432,9 @@ describe("双行证券指标", () => {
     const breakdown = wrapper.find('[data-metric="contributionBreakdown"]');
     expect(breakdown.text()).toContain("历+80.25");
     expect(breakdown.text()).toContain("持+40.25");
+    expect(
+      wrapper.find('[data-metric="realizedContribution"]').attributes("title"),
+    ).toContain("包含部分卖出和已经清仓的交易");
   });
   it("所有百分比随数字显示符号，非收益比例不加正号，零涨幅为灰", async () => {
     await start();

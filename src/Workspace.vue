@@ -580,11 +580,11 @@ onBeforeUnmount(() => {
         ><small>{{ holdings.length }}只证券 · 点击自选更新报价</small>
       </div>
       <div>
-        <span>累计已实现 · FIFO</span
+        <span>累计卖出盈亏（FIFO）</span
         ><strong :class="tone(ledger.realized)">{{
           money(ledger.realized)
         }}</strong
-        ><small>卖出净额 − FIFO持仓成本</small>
+        ><small>包含部分卖出和已经清仓的交易</small>
       </div>
       <div>
         <span>持仓浮动盈亏</span
@@ -751,7 +751,8 @@ onBeforeUnmount(() => {
             ><b>{{ todayPair.unpairedBuy }} / {{ todayPair.unpairedSell }}</b>
           </div>
           <p>
-            按成交顺序配对同日买卖，费用按数量分摊。此项与FIFO已实现收益口径不同，不能相加。
+            按成交顺序配对同日买卖，费用按数量分摊。此项与按 FIFO
+            计算的卖出盈亏口径不同，不能相加。
           </p>
         </div>
       </section>
@@ -927,7 +928,7 @@ onBeforeUnmount(() => {
               <th>做T摊薄成本</th>
               <th>最新价</th>
               <th>持仓浮动</th>
-              <th>已实现 · FIFO</th>
+              <th>历史卖出盈亏</th>
               <th></th>
             </tr>
           </thead>

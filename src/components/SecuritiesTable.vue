@@ -137,7 +137,7 @@ const headerText: Record<string, [string, string]> = {
   dailyPnl: ["今日盈亏", "收益率"],
   cyclePnl: ["本轮盈亏", "收益率"],
   totalContribution: ["累计收益贡献", "组内占比"],
-  realizedContribution: ["历史已实现", "（元）"],
+  realizedContribution: ["历史卖出盈亏", "（元）"],
   holdingContribution: ["当前持仓", "浮盈亏（元）"],
   contributionBreakdown: ["贡献拆分", "历史 / 持仓"],
 };
@@ -341,9 +341,9 @@ function hint(s: Security, c: string) {
   if (c === "dilutedCost")
     return "本轮净投入÷剩余股数（做T摊薄成本，可为负），不是FIFO成本";
   if (c === "totalContribution")
-    return "累计收益贡献＝历次卖出已实现FIFO收益＋当前剩余持仓浮盈亏；组内占比按盈利组正收益或亏损组绝对亏损计算";
+    return "累计收益贡献＝历史卖出盈亏＋当前剩余持仓浮盈亏；组内占比按盈利组正收益或亏损组绝对亏损计算";
   if (c === "realizedContribution")
-    return "该证券全部历史卖出净收入减去其匹配的FIFO成本，包含已经清仓的历史轮次";
+    return "卖出盈亏＝卖出净收入−按 FIFO 匹配的买入成本，包含部分卖出和已经清仓的交易。";
   if (c === "holdingContribution")
     return "当前持仓浮盈亏＝当前市值−剩余FIFO持仓成本；缺少报价时不估算";
   if (c === "floatCap") return "腾讯流通市值字段（亿元），不是ETF净资产";
@@ -358,7 +358,7 @@ function hint(s: Security, c: string) {
   if (c === "activity") return "第一行量比（倍），第二行换手率（%）";
   if (c === "sizeVolume") return "第一行流通市值（亿元），第二行成交量（万手）";
   if (c === "contributionBreakdown")
-    return "第一行历史已实现FIFO收益，第二行当前持仓浮盈亏";
+    return "第一行历史卖出盈亏，第二行当前持仓浮盈亏";
   return (
     marketErrors[s.id] ||
     `腾讯公开行情 · ${marketQuotes[s.id]?.quoteTime ?? "未获取"} · 可能延迟`

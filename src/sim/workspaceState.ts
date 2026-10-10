@@ -53,7 +53,7 @@ export const columnLabels: Record<string, string> = {
   dailyPnl: "今日盈亏",
   cyclePnl: "本轮持仓盈亏",
   totalContribution: "累计收益贡献",
-  realizedContribution: "历史已实现",
+  realizedContribution: "历史卖出盈亏",
   holdingContribution: "当前持仓浮盈亏",
   contributionBreakdown: "历史 / 持仓贡献",
 };

@@ -238,7 +238,7 @@ function submit() {
             </dd>
           </div>
           <div>
-            <dt>FIFO已实现</dt>
+            <dt>累计卖出盈亏（FIFO）</dt>
             <dd>
               {{ money(before.realized) }} →
               {{ money(preview.ledger.realized) }}

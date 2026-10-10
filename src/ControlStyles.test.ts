@@ -87,15 +87,13 @@ it("历史成交与资金流水隔行换色，只改变背景不覆盖金额颜�
   expect(css(".loss").color).toBe("rgb(72, 165, 121)");
   expect(css(".other td").backgroundColor).toBe("rgba(0, 0, 0, 0)");
 });
-it("历史筛选与账本表头按层级吸顶，操作列保持标准表格单元格", () => {
+it("历史与资金页只滚动表格区域，表头吸顶且操作列保持标准单元格", () => {
   fixture.innerHTML =
-    '<section class="details"><div class="table-scroll history-with-mode-tabs"><nav class="history-mode-tabs"></nav><div class="history-search-toolbar"></div><table class="ledger-history-table trade-history-table"><thead><tr><th>时间</th><th>操作</th></tr></thead><tbody><tr><td>今天</td><td class="record-actions"><button>修改</button></td></tr></tbody></table></div><div class="table-scroll"><table class="ledger-history-table cash-history-table"><thead><tr><th>发生时间</th><th>操作</th></tr></thead></table></div></section>';
-  expect(css(".history-mode-tabs").position).toBe("sticky");
-  expect(css(".history-mode-tabs").top).toBe("0px");
+    '<section class="details"><div class="table-scroll ledger-tab-layout"><nav class="history-mode-tabs"></nav><div class="history-search-toolbar"></div><div class="ledger-table-viewport"><table class="ledger-history-table trade-history-table"><thead><tr><th>时间</th><th>操作</th></tr></thead><tbody><tr><td>今天</td><td class="record-actions"><button>修改</button></td></tr></tbody></table></div></div><div class="table-scroll ledger-tab-layout"><div class="ledger-table-viewport"><table class="ledger-history-table cash-history-table"><thead><tr><th>发生时间</th><th>操作</th></tr></thead></table></div></div></section>';
+  expect(css(".ledger-tab-layout").overflow).toBe("hidden");
+  expect(css(".ledger-table-viewport").overflow).toBe("auto");
   expect(css(".history-mode-tabs").backgroundColor).toBe("rgb(252, 253, 255)");
-  expect(css(".history-search-toolbar").position).toBe("sticky");
-  expect(css(".history-search-toolbar").top).toBe("40px");
-  expect(css(".trade-history-table th").top).toBe("87px");
+  expect(css(".trade-history-table th").top).toBe("0px");
   expect(css(".cash-history-table th").top).toBe("0px");
   expect(css(".ledger-history-table").borderCollapse).toBe("separate");
   expect(css("td.record-actions").display).toBe("table-cell");

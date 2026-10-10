@@ -542,6 +542,10 @@ it("历史成交可切换为合并资金流水的对账时间线并聚焦负余�
   expect(rows[1].classes()).toContain("reconcile-negative");
   expect(rows[1].text()).toContain("开始为负");
   expect(rows[2].text()).toContain("恢复为正");
+  expect(rows[1].find(".reconcile-status small").text()).toBe(
+    "节点余额 -20.00",
+  );
+  expect(rows[2].find(".reconcile-status small").text()).toBe("节点余额 0.00");
   expect(wrapper.find(".reconcile-summary").text()).toContain("1 段");
   expect(wrapper.find(".reconcile-summary").text()).toContain("-20.00");
   expect(

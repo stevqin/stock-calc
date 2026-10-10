@@ -1758,7 +1758,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           剩余数量，可为负；日终清仓后再次开仓开启新批次。不是券商必然显示的成本。T+1按北京时间日期隔日解锁，未接入交易日历。
         </p>
       </div>
-      <div v-else-if="tab === 'cash'" class="table-scroll">
+      <div v-else-if="tab === 'cash'" class="table-scroll ledger-tab-layout">
         <div class="cash-summary">
           <span
             >累计转入 <b>{{ money(ledger.deposits) }}</b></span
@@ -1770,78 +1770,78 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             录入资金流水
           </button>
         </div>
-        <table class="ledger-history-table cash-history-table">
-          <colgroup>
-            <col style="width: 85px" />
-            <col style="width: 130px" />
-            <col style="width: 140px" />
-            <col style="width: 100px" />
-            <col />
-            <col style="width: 90px" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>发生时间</th>
-              <th>类型</th>
-              <th>收入 / 支出</th>
-              <th>计入收益</th>
-              <th>备注</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="e in cashRows" :key="e.id">
-              <td>
-                {{
-                  new Date(e.time).toLocaleString("zh-CN", {
-                    timeZone: "Asia/Shanghai",
-                    hour12: false,
-                  })
-                }}
-              </td>
-              <td>{{ cashLabels[e.kind] }}</td>
-              <td :class="e.kind === 'withdraw' ? 'loss' : 'gain'">
-                {{ e.kind === "withdraw" ? "−" : "+" }}{{ money(e.amount) }}
-              </td>
-              <td>
-                {{
-                  ["repo-interest", "interest", "other-income"].includes(e.kind)
-                    ? "是"
-                    : "否（本金）"
-                }}
-              </td>
-              <td>{{ e.note || "—" }}</td>
-              <td class="record-actions">
-                <button
-                  class="text-button"
-                  :disabled="saving"
-                  @click="openHistory('cash', e.id, 'edit')"
-                >
-                  修改
-                </button>
-                <button
-                  class="text-button delete-link"
-                  :disabled="saving"
-                  @click="openHistory('cash', e.id, 'delete')"
-                >
-                  删除
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="!cashRows.length" class="empty">
-          尚无资金流水。从实际转入资金开始记录，无需初始化余额。
-        </p>
-        <p class="footnote">
-          国债逆回购只录入已到账净利息，不填本金返还；暂不追踪逆回购本金的冻结与到期释放，因此账面余额不等于券商可取资金。
-        </p>
+        <div class="ledger-table-viewport">
+          <table class="ledger-history-table cash-history-table">
+            <colgroup>
+              <col style="width: 85px" />
+              <col style="width: 130px" />
+              <col style="width: 140px" />
+              <col style="width: 100px" />
+              <col />
+              <col style="width: 90px" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>发生时间</th>
+                <th>类型</th>
+                <th>收入 / 支出</th>
+                <th>计入收益</th>
+                <th>备注</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in cashRows" :key="e.id">
+                <td>
+                  {{
+                    new Date(e.time).toLocaleString("zh-CN", {
+                      timeZone: "Asia/Shanghai",
+                      hour12: false,
+                    })
+                  }}
+                </td>
+                <td>{{ cashLabels[e.kind] }}</td>
+                <td :class="e.kind === 'withdraw' ? 'loss' : 'gain'">
+                  {{ e.kind === "withdraw" ? "−" : "+" }}{{ money(e.amount) }}
+                </td>
+                <td>
+                  {{
+                    ["repo-interest", "interest", "other-income"].includes(
+                      e.kind,
+                    )
+                      ? "是"
+                      : "否（本金）"
+                  }}
+                </td>
+                <td>{{ e.note || "—" }}</td>
+                <td class="record-actions">
+                  <button
+                    class="text-button"
+                    :disabled="saving"
+                    @click="openHistory('cash', e.id, 'edit')"
+                  >
+                    修改
+                  </button>
+                  <button
+                    class="text-button delete-link"
+                    :disabled="saving"
+                    @click="openHistory('cash', e.id, 'delete')"
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="!cashRows.length" class="empty">
+            尚无资金流水。从实际转入资金开始记录，无需初始化余额。
+          </p>
+          <p class="footnote">
+            国债逆回购只录入已到账净利息，不填本金返还；暂不追踪逆回购本金的冻结与到期释放，因此账面余额不等于券商可取资金。
+          </p>
+        </div>
       </div>
-      <div
-        v-else-if="tab === 'trades'"
-        class="table-scroll"
-        :class="{ 'history-with-mode-tabs': !historyReadOnly }"
-      >
+      <div v-else-if="tab === 'trades'" class="table-scroll ledger-tab-layout">
         <nav
           v-if="!historyReadOnly"
           class="history-mode-tabs"
@@ -1950,248 +1950,253 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             只看异常前后
           </label>
         </section>
-        <table
-          v-if="historyMode === 'records' || historyReadOnly"
-          class="ledger-history-table trade-history-table"
-          :class="{ 'compact-history': historyCompact }"
-        >
-          <colgroup v-if="historyCompact">
-            <col style="width: 85px" />
-            <col style="width: 60px" />
-            <col style="width: 70px" />
-            <col style="width: 70px" />
-            <col style="width: 70px" />
-            <col style="width: 90px" />
-            <col style="width: 100px" />
-            <col />
-          </colgroup>
-          <colgroup v-else>
-            <col style="width: 85px" />
-            <col v-if="!historySecurityId" style="width: 160px" />
-            <col style="width: 60px" />
-            <col style="width: 90px" />
-            <col style="width: 90px" />
-            <col style="width: 90px" />
-            <col style="width: 120px" />
-            <col style="width: 120px" />
-            <col />
-            <col v-if="!historyReadOnly" style="width: 90px" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th v-if="!historySecurityId">证券</th>
-              <th>类型</th>
-              <th>价格</th>
-              <th>数量</th>
-              <th>佣金</th>
-              <th>
-                <template v-if="historyCompact"
-                  >费用合计<small>口径</small></template
-                ><template v-else>费用合计 / 口径</template>
-              </th>
-              <th>现金流</th>
-              <th>备注</th>
-              <th v-if="!historyReadOnly">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="e in tradeRows" :key="e.id">
-              <td>
-                <template v-if="historyCompact">
-                  <span>{{ e.date }}</span>
+        <div class="ledger-table-viewport">
+          <table
+            v-if="historyMode === 'records' || historyReadOnly"
+            class="ledger-history-table trade-history-table"
+            :class="{ 'compact-history': historyCompact }"
+          >
+            <colgroup v-if="historyCompact">
+              <col style="width: 85px" />
+              <col style="width: 60px" />
+              <col style="width: 70px" />
+              <col style="width: 70px" />
+              <col style="width: 70px" />
+              <col style="width: 90px" />
+              <col style="width: 100px" />
+              <col />
+            </colgroup>
+            <colgroup v-else>
+              <col style="width: 85px" />
+              <col v-if="!historySecurityId" style="width: 160px" />
+              <col style="width: 60px" />
+              <col style="width: 90px" />
+              <col style="width: 90px" />
+              <col style="width: 90px" />
+              <col style="width: 120px" />
+              <col style="width: 120px" />
+              <col />
+              <col v-if="!historyReadOnly" style="width: 90px" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th v-if="!historySecurityId">证券</th>
+                <th>类型</th>
+                <th>价格</th>
+                <th>数量</th>
+                <th>佣金</th>
+                <th>
+                  <template v-if="historyCompact"
+                    >费用合计<small>口径</small></template
+                  ><template v-else>费用合计 / 口径</template>
+                </th>
+                <th>现金流</th>
+                <th>备注</th>
+                <th v-if="!historyReadOnly">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in tradeRows" :key="e.id">
+                <td>
+                  <template v-if="historyCompact">
+                    <span>{{ e.date }}</span>
+                    <small>{{
+                      new Date(e.time).toLocaleTimeString("zh-CN", {
+                        timeZone: "Asia/Shanghai",
+                        hour12: false,
+                      })
+                    }}</small>
+                  </template>
+                  <template v-else>{{
+                    new Date(e.time).toLocaleString("zh-CN", {
+                      timeZone: "Asia/Shanghai",
+                      hour12: false,
+                    })
+                  }}</template>
+                </td>
+                <td v-if="!historySecurityId">
+                  {{
+                    account.securities.find((s) => s.id === e.securityId)?.name
+                  }}<small>{{ e.securityId }}</small>
+                </td>
+                <td
+                  :class="
+                    e.kind === 'buy' ? 'gain' : e.kind === 'sell' ? 'loss' : ''
+                  "
+                >
+                  {{ tradeTypeLabels[e.id] }}
+                </td>
+                <td>
+                  {{ e.price }}
+                </td>
+                <td>{{ e.quantity }}</td>
+                <td>{{ money(e.fees?.commission) }}</td>
+                <td>
+                  {{ money(e.fees?.total)
+                  }}<small v-if="e.fees">{{
+                    e.feeSource === "actual" ? "交割单实录" : "费率估算"
+                  }}</small>
+                </td>
+                <td>
+                  {{
+                    e.fees
+                      ? (e.kind === "buy" ? "−" : "+") + money(e.fees.cash)
+                      : "实物转入"
+                  }}
+                </td>
+                <td>{{ e.note || "—" }}</td>
+                <td v-if="!historyReadOnly" class="record-actions">
+                  <button
+                    class="text-button"
+                    :disabled="saving"
+                    @click="openHistory('trade', e.id, 'edit')"
+                  >
+                    修改
+                  </button>
+                  <button
+                    class="text-button delete-link"
+                    :disabled="saving"
+                    @click="openHistory('trade', e.id, 'delete')"
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p
+            v-if="
+              (historyMode === 'records' || historyReadOnly) &&
+              !tradeRows.length
+            "
+            class="empty"
+          >
+            {{
+              effectiveHistorySecurityId ? "该证券暂无交易记录" : "暂无成交记录"
+            }}
+          </p>
+          <table
+            v-if="historyMode === 'reconcile' && !historyReadOnly"
+            class="ledger-history-table reconcile-table"
+          >
+            <colgroup>
+              <col style="width: 142px" />
+              <col style="width: 94px" />
+              <col />
+              <col style="width: 120px" />
+              <col style="width: 128px" />
+              <col style="width: 88px" />
+              <col style="width: 72px" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>发生时间</th>
+                <th>记录类型</th>
+                <th>内容</th>
+                <th>资金变动</th>
+                <th>变动后资金</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in visibleReconciliationRows"
+                :key="row.scope + ':' + row.id"
+                :class="{
+                  'reconcile-negative': row.negative,
+                  'reconcile-start': row.startsNegative,
+                  'reconcile-recovered': row.recovers,
+                }"
+              >
+                <td class="reconcile-time">
+                  <span>{{ row.date }}</span>
                   <small>{{
-                    new Date(e.time).toLocaleTimeString("zh-CN", {
+                    new Date(row.time).toLocaleTimeString("zh-CN", {
                       timeZone: "Asia/Shanghai",
                       hour12: false,
                     })
                   }}</small>
-                </template>
-                <template v-else>{{
-                  new Date(e.time).toLocaleString("zh-CN", {
-                    timeZone: "Asia/Shanghai",
-                    hour12: false,
-                  })
-                }}</template>
-              </td>
-              <td v-if="!historySecurityId">
-                {{ account.securities.find((s) => s.id === e.securityId)?.name
-                }}<small>{{ e.securityId }}</small>
-              </td>
-              <td
-                :class="
-                  e.kind === 'buy' ? 'gain' : e.kind === 'sell' ? 'loss' : ''
-                "
-              >
-                {{ tradeTypeLabels[e.id] }}
-              </td>
-              <td>
-                {{ e.price }}
-              </td>
-              <td>{{ e.quantity }}</td>
-              <td>{{ money(e.fees?.commission) }}</td>
-              <td>
-                {{ money(e.fees?.total)
-                }}<small v-if="e.fees">{{
-                  e.feeSource === "actual" ? "交割单实录" : "费率估算"
-                }}</small>
-              </td>
-              <td>
-                {{
-                  e.fees
-                    ? (e.kind === "buy" ? "−" : "+") + money(e.fees.cash)
-                    : "实物转入"
-                }}
-              </td>
-              <td>{{ e.note || "—" }}</td>
-              <td v-if="!historyReadOnly" class="record-actions">
-                <button
-                  class="text-button"
-                  :disabled="saving"
-                  @click="openHistory('trade', e.id, 'edit')"
-                >
-                  修改
-                </button>
-                <button
-                  class="text-button delete-link"
-                  :disabled="saving"
-                  @click="openHistory('trade', e.id, 'delete')"
-                >
-                  删除
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p
-          v-if="
-            (historyMode === 'records' || historyReadOnly) && !tradeRows.length
-          "
-          class="empty"
-        >
-          {{
-            effectiveHistorySecurityId ? "该证券暂无交易记录" : "暂无成交记录"
-          }}
-        </p>
-        <table
-          v-if="historyMode === 'reconcile' && !historyReadOnly"
-          class="ledger-history-table reconcile-table"
-        >
-          <colgroup>
-            <col style="width: 142px" />
-            <col style="width: 94px" />
-            <col />
-            <col style="width: 120px" />
-            <col style="width: 128px" />
-            <col style="width: 88px" />
-            <col style="width: 72px" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>发生时间</th>
-              <th>记录类型</th>
-              <th>内容</th>
-              <th>资金变动</th>
-              <th>变动后资金</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in visibleReconciliationRows"
-              :key="row.scope + ':' + row.id"
-              :class="{
-                'reconcile-negative': row.negative,
-                'reconcile-start': row.startsNegative,
-                'reconcile-recovered': row.recovers,
-              }"
-            >
-              <td class="reconcile-time">
-                <span>{{ row.date }}</span>
-                <small>{{
-                  new Date(row.time).toLocaleTimeString("zh-CN", {
-                    timeZone: "Asia/Shanghai",
-                    hour12: false,
-                  })
-                }}</small>
-              </td>
-              <td>
-                {{
-                  row.scope === "cash"
-                    ? cashLabels[reconciliationCash(row)!.kind]
-                    : tradeTypeLabels[row.id]
-                }}
-              </td>
-              <td class="reconcile-content">
-                <template v-if="reconciliationTrade(row)">
-                  <b>{{
-                    account.securities.find(
-                      (security) =>
-                        security.id === reconciliationTrade(row)!.securityId,
-                    )?.name
-                  }}</b>
-                  <small>
-                    {{ reconciliationTrade(row)!.securityId }} ·
-                    {{ reconciliationTrade(row)!.quantity }}股/份 ×
-                    {{ reconciliationTrade(row)!.price }}元
-                  </small>
-                </template>
-                <template v-else>
-                  <b>{{ reconciliationCash(row)!.note || "无备注" }}</b>
-                  <small>{{ reconciliationCash(row)!.amount }}元</small>
-                </template>
-              </td>
-              <td :class="Number(row.delta) >= 0 ? 'gain' : 'loss'">
-                {{ Number(row.delta) > 0 ? "+" : "" }}{{ money(row.delta) }}
-              </td>
-              <td class="reconcile-balance" :class="{ loss: row.negative }">
-                {{ money(row.balance) }}
-              </td>
-              <td class="reconcile-status">
-                <strong v-if="row.startsNegative">开始为负</strong>
-                <strong v-else-if="row.recovers">恢复为正</strong>
-                <span v-else-if="row.negative">仍为负</span>
-                <span v-else>正常</span>
-              </td>
-              <td class="record-actions">
-                <button
-                  type="button"
-                  class="text-button"
-                  :aria-label="
-                    '修改' + (row.scope === 'trade' ? '成交' : '资金流水')
-                  "
-                  :disabled="saving"
-                  @click="openHistory(row.scope, row.id, 'edit')"
-                >
-                  修改
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p
-          v-if="
-            historyMode === 'reconcile' &&
-            !historyReadOnly &&
-            !visibleReconciliationRows.length
-          "
-          class="empty"
-        >
-          {{
-            historyIssuesOnly
-              ? "所选范围内没有负余额记录"
-              : "所选范围内没有可对账记录"
-          }}
-        </p>
-        <p v-if="!historyReadOnly" class="footnote">
-          <template v-if="historyMode === 'records'">
-            修改、删除前预览全账本重算结果。估算费用使用该记录保存的历史费率，实际费用按交割单填写；时间相同时保留原记录顺序。
-          </template>
-          <template v-else>
-            时间线按时间正序排列；同一时刻先计入资金流水，再处理成交。红色区域表示该笔完成后账面资金为负，修改记录前请先核对交割单与银证转账时间。
-          </template>
-        </p>
+                </td>
+                <td>
+                  {{
+                    row.scope === "cash"
+                      ? cashLabels[reconciliationCash(row)!.kind]
+                      : tradeTypeLabels[row.id]
+                  }}
+                </td>
+                <td class="reconcile-content">
+                  <template v-if="reconciliationTrade(row)">
+                    <b>{{
+                      account.securities.find(
+                        (security) =>
+                          security.id === reconciliationTrade(row)!.securityId,
+                      )?.name
+                    }}</b>
+                    <small>
+                      {{ reconciliationTrade(row)!.securityId }} ·
+                      {{ reconciliationTrade(row)!.quantity }}股/份 ×
+                      {{ reconciliationTrade(row)!.price }}元
+                    </small>
+                  </template>
+                  <template v-else>
+                    <b>{{ reconciliationCash(row)!.note || "无备注" }}</b>
+                    <small>{{ reconciliationCash(row)!.amount }}元</small>
+                  </template>
+                </td>
+                <td :class="Number(row.delta) >= 0 ? 'gain' : 'loss'">
+                  {{ Number(row.delta) > 0 ? "+" : "" }}{{ money(row.delta) }}
+                </td>
+                <td class="reconcile-balance" :class="{ loss: row.negative }">
+                  {{ money(row.balance) }}
+                </td>
+                <td class="reconcile-status">
+                  <strong v-if="row.startsNegative">开始为负</strong>
+                  <strong v-else-if="row.recovers">恢复为正</strong>
+                  <span v-else-if="row.negative">仍为负</span>
+                  <span v-else>正常</span>
+                  <small>节点余额 {{ money(row.balance) }}</small>
+                </td>
+                <td class="record-actions">
+                  <button
+                    type="button"
+                    class="text-button"
+                    :aria-label="
+                      '修改' + (row.scope === 'trade' ? '成交' : '资金流水')
+                    "
+                    :disabled="saving"
+                    @click="openHistory(row.scope, row.id, 'edit')"
+                  >
+                    修改
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p
+            v-if="
+              historyMode === 'reconcile' &&
+              !historyReadOnly &&
+              !visibleReconciliationRows.length
+            "
+            class="empty"
+          >
+            {{
+              historyIssuesOnly
+                ? "所选范围内没有负余额记录"
+                : "所选范围内没有可对账记录"
+            }}
+          </p>
+          <p v-if="!historyReadOnly" class="footnote">
+            <template v-if="historyMode === 'records'">
+              修改、删除前预览全账本重算结果。估算费用使用该记录保存的历史费率，实际费用按交割单填写；时间相同时保留原记录顺序。
+            </template>
+            <template v-else>
+              时间线按时间正序排列；同一时刻先计入资金流水，再处理成交。红色区域表示该笔完成后账面资金为负，修改记录前请先核对交割单与银证转账时间。
+            </template>
+          </p>
+        </div>
       </div>
       <div v-else-if="tab === 'planner' && security" class="planner">
         <nav class="planner-mode-tabs" aria-label="测算方式" role="tablist">

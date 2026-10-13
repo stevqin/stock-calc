@@ -1,0 +1,43 @@
+{
+  "fixtureVersion": 1,
+  "verifiedOn": "2026-10-13",
+  "kind": "observedMetadata",
+  "samples": [
+    {
+      "sample": "sh",
+      "securityCode": "600519",
+      "httpStatus": 200,
+      "pdfSha256": "0e10aa26be46b1cf3cd03f06e834c7fb98d5dd0d661b96f8fddd4af7e846a4f6",
+      "pdfByteCount": 832321,
+      "extractedCharacterCount": 121935,
+      "entityVerified": true,
+      "extractor": "pdftotext",
+      "fullTextStoredInRepository": false
+    },
+    {
+      "sample": "sz",
+      "securityCode": "000001",
+      "httpStatus": 200,
+      "pdfSha256": "bf70f60285c20dc50dbb59c97d9e6cd9f6c6cfb33905224f135f4dade1cab408",
+      "pdfByteCount": 92643,
+      "extractedCharacterCount": 359,
+      "entityVerified": true,
+      "extractor": "pdftotext",
+      "fullTextStoredInRepository": false
+    },
+    {
+      "sample": "etf",
+      "securityCode": "510300",
+      "httpStatus": 200,
+      "pdfSha256": "c58a800bd564014e2d49826a0e9ccd965fdee8333a37f138e41442ad71dfe0ad",
+      "pdfByteCount": 2322659,
+      "extractedCharacterCount": 74757,
+      "entityVerified": true,
+      "extractor": "pdftotext",
+      "fullTextStoredInRepository": false
+    }
+  ],
+  "cninfoListAnnouncementContentEmpty": true,
+  "cninfoObservedLocalTimestamp": "2026-10-13T00:00:00+08:00",
+  "cninfoPublicationTimePrecision": "dateOnlyNotVerifiedIntraday"
+}

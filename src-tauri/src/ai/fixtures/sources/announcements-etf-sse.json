@@ -1,0 +1,49 @@
+{
+  "fixtureVersion": 1,
+  "verifiedOn": "2026-10-13",
+  "kind": "observedMetadata",
+  "source": "sse",
+  "endpoint": "https://query.sse.com.cn/commonQuery.do",
+  "sqlId": "COMMON_PL_JJXX_JJGG_NEW_L",
+  "samples": [
+    {
+      "securityCode": "510300",
+      "from": "2026-09-13",
+      "to": "2026-10-13",
+      "responseSha256": "f4595fc27e6be188e41570ada3be89d56b22fb0ddad90b680d18bd04fed89395",
+      "total": 0,
+      "items": []
+    },
+    {
+      "securityCode": "510300",
+      "from": "2026-01-01",
+      "to": "2026-10-13",
+      "responseSha256": "7cf125bda38509a868007e8ab0a20daf4a8a9e0ff3df0d52d768b77d05584570",
+      "total": 16,
+      "items": [
+        {
+          "SSEDATE": "2026-08-29",
+          "TITLE": "华泰柏瑞沪深300交易型开放式指数证券投资基金2026年中期报告",
+          "FUND_EXPANSION_ABBR": "沪深300ETF华泰柏瑞",
+          "SECURITY_CODE": "510300",
+          "URL": "/disclosure/fund/announcement/c/new/2026-08-29/510300_20260829_2Q86.pdf"
+        },
+        {
+          "SSEDATE": "2026-08-13",
+          "TITLE": "华泰柏瑞沪深300交易型开放式指数证券投资基金更新的招募说明书2026年第1号",
+          "FUND_EXPANSION_ABBR": "沪深300ETF华泰柏瑞",
+          "SECURITY_CODE": "510300",
+          "URL": "/disclosure/fund/announcement/c/new/2026-08-13/510300_20260813_FPSL.pdf"
+        },
+        {
+          "SSEDATE": "2026-08-05",
+          "TITLE": "华泰柏瑞基金管理有限公司关于旗下基金投资关联方承销期内承销证券的公告",
+          "FUND_EXPANSION_ABBR": "沪深300ETF华泰柏瑞",
+          "SECURITY_CODE": "510300",
+          "URL": "/disclosure/fund/announcement/c/new/2026-08-05/510300_20260805_BB9P.pdf"
+        }
+      ]
+    }
+  ],
+  "cninfoFundCodeListContains510300": false
+}

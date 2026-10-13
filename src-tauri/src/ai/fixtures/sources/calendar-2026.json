@@ -1,0 +1,57 @@
+{
+  "fixtureVersion": 1,
+  "verifiedOn": "2026-10-13",
+  "kind": "observedMetadata",
+  "coverageStart": "2026-01-01",
+  "coverageEnd": "2026-12-31",
+  "timezone": "Asia/Shanghai",
+  "sources": [
+    "https://www.sse.com.cn/disclosure/dealinstruc/closed/c/c_20251222_10802510.shtml",
+    "https://investor.szse.cn/disclosure/notice/general/t20251222_618087.html"
+  ],
+  "sourcePublicationDate": "2025-12-22",
+  "holidayClosures": [
+    [
+      "2026-01-01",
+      "2026-01-03"
+    ],
+    [
+      "2026-02-15",
+      "2026-02-23"
+    ],
+    [
+      "2026-04-04",
+      "2026-04-06"
+    ],
+    [
+      "2026-05-01",
+      "2026-05-05"
+    ],
+    [
+      "2026-06-19",
+      "2026-06-21"
+    ],
+    [
+      "2026-09-25",
+      "2026-09-27"
+    ],
+    [
+      "2026-10-01",
+      "2026-10-07"
+    ]
+  ],
+  "explicitWeekendClosures": [
+    "2026-01-04",
+    "2026-02-14",
+    "2026-02-28",
+    "2026-05-09",
+    "2026-09-20",
+    "2026-10-10"
+  ],
+  "emergencyClosureUpdatesIncluded": false,
+  "futureYearsVerified": false,
+  "rawResponseHashes": {
+    "sse": "a294d3f1ee7c5f7386ae6d9d28020d9ae5034f5d1d68726c09beb045faa0de54",
+    "szse": "1656d8708d5faed33c7588538639d96128f39fdface02cfa6eb66d796c40f14e"
+  }
+}

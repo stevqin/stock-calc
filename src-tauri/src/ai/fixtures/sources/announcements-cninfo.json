@@ -1,0 +1,96 @@
+{
+  "fixtureVersion": 1,
+  "verifiedOn": "2026-10-13",
+  "kind": "observedMetadata",
+  "source": "cninfo",
+  "endpoint": "https://www.cninfo.com.cn/new/hisAnnouncement/query",
+  "method": "POST",
+  "samples": [
+    {
+      "securityCode": "600519",
+      "from": "2026-01-01",
+      "to": "2026-10-13",
+      "responseSha256": "501363a6616b8536174922c83e502e143b1bff51a136f5b688b242f84f650392",
+      "totalAnnouncement": 62,
+      "items": [
+        {
+          "secCode": "600519",
+          "secName": "贵州茅台",
+          "orgId": "gssh0600519",
+          "announcementId": "1225475868",
+          "announcementTitle": "贵州茅台2026年半年度报告",
+          "announcementTime": 1786723200000,
+          "adjunctUrl": "finalpage/2026-08-15/1225475868.PDF",
+          "adjunctType": "PDF"
+        },
+        {
+          "secCode": "600519",
+          "secName": "贵州茅台",
+          "orgId": "gssh0600519",
+          "announcementId": "1225475864",
+          "announcementTitle": "贵州茅台关于会计政策变更的公告",
+          "announcementTime": 1786723200000,
+          "adjunctUrl": "finalpage/2026-08-15/1225475864.PDF",
+          "adjunctType": "PDF"
+        },
+        {
+          "secCode": "600519",
+          "secName": "贵州茅台",
+          "orgId": "gssh0600519",
+          "announcementId": "1225475863",
+          "announcementTitle": "贵州茅台关于贵州茅台集团财务有限公司的风险评估报告",
+          "announcementTime": 1786723200000,
+          "adjunctUrl": "finalpage/2026-08-15/1225475863.PDF",
+          "adjunctType": "PDF"
+        }
+      ]
+    },
+    {
+      "securityCode": "600519",
+      "from": "2026-09-13",
+      "to": "2026-10-13",
+      "responseSha256": "c2a890bbf3a6a53ab02ddc6c1794bf1c72ba45799fe9f59dcc5ba2cc18467114",
+      "totalAnnouncement": 0,
+      "items": []
+    },
+    {
+      "securityCode": "000001",
+      "from": "2026-09-13",
+      "to": "2026-10-13",
+      "responseSha256": "f08c3e28791496ac0ad401001b53a7fd4bfbd89db97671e29ae46a62b9838001",
+      "totalAnnouncement": 5,
+      "items": [
+        {
+          "secCode": "000001",
+          "secName": "平安银行",
+          "orgId": "gssz0000001",
+          "announcementId": "1225601360",
+          "announcementTitle": "关于副行长任职资格核准的公告",
+          "announcementTime": 1791820800000,
+          "adjunctUrl": "finalpage/2026-10-13/1225601360.PDF",
+          "adjunctType": "PDF"
+        },
+        {
+          "secCode": "000001",
+          "secName": "平安银行",
+          "orgId": "gssz0000001",
+          "announcementId": "1225587230",
+          "announcementTitle": "董事会决议公告",
+          "announcementTime": 1790697600000,
+          "adjunctUrl": "finalpage/2026-09-30/1225587230.PDF",
+          "adjunctType": "PDF"
+        },
+        {
+          "secCode": "000001",
+          "secName": "平安银行",
+          "orgId": "gssz0000001",
+          "announcementId": "1225574840",
+          "announcementTitle": "关于2026年金融债券（第一期）发行完毕的公告",
+          "announcementTime": 1790006400000,
+          "adjunctUrl": "finalpage/2026-09-22/1225574840.PDF",
+          "adjunctType": "PDF"
+        }
+      ]
+    }
+  ]
+}

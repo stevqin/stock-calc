@@ -1,0 +1,106 @@
+{
+  "fixtureVersion": 1,
+  "verifiedOn": "2026-10-13",
+  "kind": "observedMetadata",
+  "source": "eastmoney",
+  "productionEnabled": false,
+  "enablementReason": "News excerpt storage and external model processing scope not verified",
+  "endpoint": "https://search-api-web.eastmoney.com/search/jsonp",
+  "callback": "sourceValidation",
+  "returnedFields": [
+    "date",
+    "mediaName",
+    "url",
+    "title",
+    "content",
+    "code",
+    "image"
+  ],
+  "omittedFields": [
+    "title",
+    "content",
+    "image"
+  ],
+  "timezoneVerified": false,
+  "samples": [
+    {
+      "keyword": "600519",
+      "httpStatus": 200,
+      "businessCode": 0,
+      "hitsTotal": 572,
+      "responseSha256": "5f481a563a87ef7321987c6580cff973a52575ae22c3229f477197aba5e3f907",
+      "returnedCount": 3,
+      "items": [
+        {
+          "date": "2026-10-13 02:07:37",
+          "mediaName": "证券时报",
+          "url": "http://finance.eastmoney.com/a/202610133893054131.html"
+        },
+        {
+          "date": "2026-10-13 00:08:16",
+          "mediaName": "第一财经",
+          "url": "http://finance.eastmoney.com/a/202610123892995811.html"
+        },
+        {
+          "date": "2026-10-12 20:37:14",
+          "mediaName": "国际金融报",
+          "url": "http://finance.eastmoney.com/a/202610123892878711.html"
+        }
+      ]
+    },
+    {
+      "keyword": "000001",
+      "httpStatus": 200,
+      "businessCode": 0,
+      "hitsTotal": 171,
+      "responseSha256": "6e27a1ae7e91d86820bd91d7bd2aab16e2f437e06ff09fe397a71ca0b7f9f7aa",
+      "returnedCount": 3,
+      "items": [
+        {
+          "date": "2026-10-13 15:18:43",
+          "mediaName": "时代财经",
+          "url": "http://finance.eastmoney.com/a/202610133894120116.html"
+        },
+        {
+          "date": "2026-10-12 21:43:00",
+          "mediaName": "证券时报网",
+          "url": "http://finance.eastmoney.com/a/202610123892923730.html"
+        },
+        {
+          "date": "2026-10-12 16:42:00",
+          "mediaName": "证券时报网",
+          "url": "http://finance.eastmoney.com/a/202610123892721614.html"
+        }
+      ]
+    },
+    {
+      "keyword": "510300",
+      "httpStatus": 200,
+      "businessCode": 0,
+      "hitsTotal": 415,
+      "responseSha256": "caa30c578839fe6ccec2c324b7e554504932e91fbd2588c2fd5cc26d742c2e44",
+      "returnedCount": 3,
+      "items": [
+        {
+          "date": "2026-10-13 16:33:00",
+          "mediaName": "证券时报网",
+          "url": "http://stock.eastmoney.com/a/202610133894199653.html"
+        },
+        {
+          "date": "2026-10-13 13:53:36",
+          "mediaName": "中国证券报",
+          "url": "http://stock.eastmoney.com/a/202610133894066143.html"
+        },
+        {
+          "date": "2026-10-13 13:22:45",
+          "mediaName": "界面新闻",
+          "url": "http://stock.eastmoney.com/a/202610133894055920.html"
+        }
+      ]
+    }
+  ],
+  "withoutCallback": {
+    "httpStatus": 400,
+    "businessCode": 400
+  }
+}

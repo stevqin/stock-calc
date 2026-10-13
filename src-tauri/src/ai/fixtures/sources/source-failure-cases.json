@@ -1,0 +1,41 @@
+{
+  "fixtureVersion": 1,
+  "verifiedOn": "2026-10-13",
+  "kind": "observedMetadata",
+  "cases": [
+    {
+      "case": "news_missing_jsonp_callback",
+      "provenance": "observed",
+      "httpStatus": 400,
+      "responseBodyFormat": "json",
+      "responseSha256": "077c87225afcc120b5269ca9e26da7494eba0d7e18d4f1668ca3b35448b4a46c"
+    },
+    {
+      "case": "cninfo_wrong_http_method",
+      "provenance": "observed",
+      "httpStatus": 500,
+      "responseBodyFormat": "html",
+      "responseSha256": "915f3a7abdcaefeb404f5f2ae5349b8a8ebdb53b0c9b3659a12d0813ccb5f191"
+    },
+    {
+      "case": "guessed_script_path",
+      "provenance": "observed",
+      "httpStatus": 404,
+      "url": "https://static.cninfo.com.cn/new/assets/js/disclosure/list/search.js"
+    },
+    {
+      "case": "cninfo_keyword_is_not_exact_etf_identity",
+      "provenance": "observed",
+      "queryCode": "510300",
+      "firstReturnedCode": "159227",
+      "mustNotTreatAsMatched": true
+    },
+    {
+      "case": "pdf_unavailable_or_unextractable",
+      "provenance": "derivedFailureCase",
+      "liveFailureObserved": false,
+      "expectedAvailability": "titleOnly",
+      "expectedBodyFactsAllowed": false
+    }
+  ]
+}

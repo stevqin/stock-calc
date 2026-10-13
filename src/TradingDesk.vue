@@ -24,6 +24,7 @@ import MarketChart from "./components/MarketChart.vue";
 import LedgerWorkbench from "./LedgerWorkbench.vue";
 import RecoveryCenter from "./components/RecoveryCenter.vue";
 import PnlAnalysis from "./PnlAnalysis.vue";
+import ModelSettings from "./ai/ModelSettings.vue";
 import { clearAnalysisHistory } from "./analysisHistory";
 import { manualAccount, upgradeAccount } from "./sim/record";
 import { replay, validateAccount, validateSecurity } from "./sim/ledger";
@@ -1136,6 +1137,7 @@ onBeforeUnmount(() => {
             { id: 'analysis', name: '盈亏分析' },
             { id: 'cash', name: '资金流水' },
             { id: 'fees', name: '费用设置' },
+            { id: 'aiSettings', name: 'AI 设置' },
             { id: 'backup', name: '备份恢复' },
           ]"
           :key="p.id"
@@ -1658,6 +1660,9 @@ onBeforeUnmount(() => {
           </div>
         </Transition>
       </div>
+    </section>
+    <section v-else-if="page === 'aiSettings'" class="desk-page">
+      <ModelSettings />
     </section>
     <section v-else-if="page === 'analysis'" class="desk-page">
       <PnlAnalysis :account="account" />

@@ -106,4 +106,14 @@ describe("持仓下拉面板", () => {
     expect(invoke).toHaveBeenCalledWith("hide_status_panel");
     wrapper.unmount();
   });
+
+  it("点击股票名后立即切换菜单栏轮播项", async () => {
+    const wrapper = mount(StatusPanel);
+    await flushPromises();
+    await wrapper.findAll("tbody td:first-child strong")[1].trigger("click");
+    expect(invoke).toHaveBeenLastCalledWith("set_status_active_index", {
+      index: 1,
+    });
+    wrapper.unmount();
+  });
 });

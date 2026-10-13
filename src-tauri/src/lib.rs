@@ -297,6 +297,7 @@ pub fn run() {
             status_bar::update_status_bar,
             status_bar::get_status_portfolio,
             status_bar::get_status_active_index,
+            status_bar::set_status_active_index,
             status_bar::hide_status_panel,
             status_bar::open_status_main,
             status_bar::get_status_paused,

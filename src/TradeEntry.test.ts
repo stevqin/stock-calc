@@ -4,6 +4,7 @@ import { marketQuotes } from "./market";
 import LedgerWorkbench from "./LedgerWorkbench.vue";
 import DateTimeField from "./components/DateTimeField.vue";
 import { manualAccount, draftRecord, insertRecord } from "./sim/record";
+import { localDateTime } from "./sim/model";
 import { loadAccount, saveAccount } from "./sim/repository";
 import { readDraft, writeDraft } from "./sim/drafts";
 vi.mock("./sim/repository", () => ({
@@ -59,9 +60,9 @@ beforeEach(() => {
   vi.mocked(writeDraft).mockResolvedValue(undefined);
 });
 afterEach(() => wrapper?.unmount());
-async function start() {
+async function start(symbol = id) {
   wrapper = mount(LedgerWorkbench, {
-    props: { embedded: true, action: "record", symbol: id },
+    props: { embedded: true, action: "record", symbol },
     global: { stubs: { MarketChart: true } },
   });
   await flushPromises();
@@ -77,6 +78,25 @@ async function setTradeTime(value: string) {
   await wrapper.vm.$nextTick();
 }
 describe("先输入再选择买卖", () => {
+  it("成交价、成交股数和发生时间使用同一字段行布局", async () => {
+    await start();
+    const fields = wrapper.get(".trade-main-fields").findAll(":scope > *");
+    expect(fields).toHaveLength(3);
+    expect(fields.every((field) => field.classes("trade-main-field"))).toBe(
+      true,
+    );
+  });
+  it("行情参考和成交数量分别成组展示", async () => {
+    await start();
+    const groups = wrapper.findAll(".trade-quick-group");
+    expect(groups).toHaveLength(2);
+    expect(groups[0].text()).toContain("行情参考");
+    expect(groups[0].text()).toContain("点选填入");
+    expect(groups[0].findAll("button")).toHaveLength(3);
+    expect(groups[1].text()).toContain("成交数量");
+    expect(groups[1].text()).toContain("持仓 1,000");
+    expect(groups[1].text()).toContain("可卖 1,000");
+  });
   it("显示双向成交金额和费用，超卖只禁用卖出而不显示持仓不足提示", async () => {
     await start();
     expect(
@@ -178,11 +198,28 @@ describe("先输入再选择买卖", () => {
     expect(saved.feeSource).toBe("actual");
     expect(saved.fees?.cash).toBe("998.49");
   });
-  it("可一键填入全部可卖数量，清仓后不显示收益预览", async () => {
+  it("全部可卖只填入今日可卖数量，不把它表述为清仓", async () => {
+    const now = new Date();
+    insertRecord(
+      account,
+      draftRecord(
+        account,
+        id,
+        "buy",
+        "10",
+        "300",
+        new Date(now.getTime() - 60_000).toISOString(),
+      ).entry,
+    );
     await start();
-    const close = wrapper.get(".quantity-shortcuts .close-position");
-    expect(close.text()).toBe("清仓（全部可卖）");
-    await close.trigger("click");
+    await setTradeTime(localDateTime(now));
+    const available = wrapper.get(".quantity-shortcuts .available-position");
+    expect(wrapper.get(".trade-settlement-badge").text()).toBe("T+1");
+    expect(wrapper.get(".quantity-shortcuts").text()).not.toContain("清仓");
+    expect(available.text()).toContain("全部可卖");
+    expect(available.text()).toContain("1,000");
+    expect(available.attributes("title")).toContain("仍持有 300");
+    await available.trigger("click");
     expect(
       (
         wrapper.get('[data-testid="trade-quantity"]')
@@ -192,9 +229,50 @@ describe("先输入再选择买卖", () => {
     await wrapper.get('[data-testid="trade-price"]').setValue("11");
     expect(
       wrapper.get('[data-direction="sell"] .trade-cost-preview').text(),
-    ).toContain("10.0000 → 已清仓");
-    expect(wrapper.find(".trade-profit-preview").exists()).toBe(false);
+    ).not.toContain("已清仓");
     expect(saveAccount).not.toHaveBeenCalled();
+  });
+  it("T+0 当日买入立即可卖，全部持仓可卖时明确显示清仓", async () => {
+    const symbol = "sh510300";
+    const target = account.securities.find((item) => item.id === symbol)!;
+    target.category = "cross-border";
+    target.settlement = "T+0";
+    account.profiles.etf = { ...account.profiles.stock, stampPercent: "0" };
+    account.feeConfirmed.etf = true;
+    account.entries.push({
+      id: "etf-opening",
+      securityId: symbol,
+      kind: "opening",
+      quantity: "1000",
+      available: "1000",
+      price: "10",
+      date: "2026-08-27",
+      time: "2026-08-27T01:00:00.000Z",
+    });
+    const now = new Date();
+    account.entries.push(
+      draftRecord(
+        account,
+        symbol,
+        "buy",
+        "10",
+        "300",
+        new Date(now.getTime() - 60_000).toISOString(),
+      ).entry,
+    );
+    await start(symbol);
+    const available = wrapper.get(".quantity-shortcuts .available-position");
+    expect(wrapper.get(".trade-settlement-badge").text()).toBe("T+0");
+    expect(available.text()).toContain("清仓");
+    expect(available.text()).toContain("1,300");
+    expect(available.attributes("title")).toContain("卖出后持仓归零");
+    await available.trigger("click");
+    expect(
+      (
+        wrapper.get('[data-testid="trade-quantity"]')
+          .element as HTMLInputElement
+      ).value,
+    ).toBe("1300");
   });
   it("预览含费用的买卖后摊薄成本，随价格更新并处理清仓", async () => {
     await start();
@@ -205,7 +283,9 @@ describe("先输入再选择买卖", () => {
     await wrapper.get('[data-testid="trade-price"]').setValue("11");
     expect(cost("buy").text()).toContain("10.0955");
     expect(cost("sell").text()).toContain("9.8951");
-    await wrapper.get(".quantity-shortcuts .close-position").trigger("click");
+    await wrapper
+      .get(".quantity-shortcuts .available-position")
+      .trigger("click");
     expect(cost("sell").text()).toContain("已清仓");
     expect(cost("sell").text()).not.toContain("NaN");
     await wrapper.get('[data-testid="trade-quantity"]').setValue("0");

@@ -40,11 +40,14 @@ button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-button:focus-visible,
 a:focus-visible,
 summary:focus-visible {
   outline: 3px solid #95b5ef;
   outline-offset: 3px;
+}
+button:is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 input:focus,
 select:focus {

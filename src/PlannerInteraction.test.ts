@@ -264,7 +264,7 @@ it("主动载入旧草稿后锁定价格，行情填价按钮也视为手动选�
   expect(value("成交价")).toBe("9.88");
   await wrapper
     .findAll(".quote-fill button")
-    .find((b) => b.text() === "最新")!
+    .find((b) => b.text().includes("最新"))!
     .trigger("click");
   marketQuotes.sh510300.latest = "12";
   await vi.advanceTimersByTimeAsync(3000);

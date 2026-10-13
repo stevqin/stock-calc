@@ -1,6 +1,7 @@
 import type { StatusSnapshot } from "../../src/statusBar";
 export const sample: StatusSnapshot = {
   frames: [],
+  trades: [],
   date: "2026-09-08",
   updatedAt: Date.now(),
   holdings: [

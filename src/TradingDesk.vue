@@ -55,6 +55,11 @@ import {
 } from "./sim/performance";
 import type { ChartMode } from "./sim/chart";
 import {
+  analyzeDayTPerformance,
+  analyzeTradeStages,
+  analyzeUnmatchedDayBuys,
+} from "./sim/tradeStages";
+import {
   marketQuotes,
   marketCharts,
   marketErrors,
@@ -368,6 +373,37 @@ const performance = computed(() => {
       ];
     }),
   );
+});
+const selectedTradeAnalysis = computed(() =>
+  selected.value
+    ? analyzeTradeStages(
+        account.value.entries,
+        selected.value,
+        marketQuotes[selected.value]?.latest,
+      )
+    : null,
+);
+const selectedCurrentStage = computed(() =>
+  selectedTradeAnalysis.value?.stages.at(-1),
+);
+const selectedDayTPerformance = computed(() => {
+  const id = selected.value;
+  const date = id ? performance.value[id]?.date : undefined;
+  return id && date
+    ? analyzeDayTPerformance(account.value.entries, id, date)
+    : null;
+});
+const selectedUnmatchedDayBuys = computed(() => {
+  const id = selected.value;
+  const date = id ? performance.value[id]?.date : undefined;
+  return id && date
+    ? analyzeUnmatchedDayBuys(
+        account.value.entries,
+        id,
+        date,
+        marketQuotes[id]?.latest,
+      )
+    : null;
 });
 const totals = computed(() => {
   let market = new Decimal(0),
@@ -856,6 +892,7 @@ const menuBarSnapshot = computed<StatusSnapshot>(() => {
   const held = holdingIds.value.filter((id) =>
     new Decimal(ledger.value.positions[id]?.quantity ?? 0).gt(0),
   );
+  const heldSet = new Set(held);
   const names = shortNames(
     held.map((id) => ({ id, name: securities.value.get(id)?.name ?? id })),
     menuAliases.value,
@@ -885,8 +922,24 @@ const menuBarSnapshot = computed<StatusSnapshot>(() => {
     profit: totals.value.daily,
     stale: holdingIds.value.some(stale),
   };
+  const trades = account.value.entries
+    .filter(
+      (entry) =>
+        heldSet.has(entry.securityId) &&
+        (entry.kind === "buy" || entry.kind === "sell"),
+    )
+    .map(({ id, securityId, kind, quantity, price, time, date }) => ({
+      id,
+      securityId,
+      kind,
+      quantity,
+      price,
+      time,
+      date,
+    }));
   return {
     holdings,
+    trades,
     total,
     date: marketDate.value,
     updatedAt: clock.value,
@@ -1532,7 +1585,7 @@ onBeforeUnmount(() => {
                   :mode="detailMode"
                   hide-hero
                 >
-                  <template #chart="{ setChipVisible }">
+                  <template #chart-tabs>
                     <div class="segmented">
                       <button
                         v-for="m in detailModes"
@@ -1543,6 +1596,8 @@ onBeforeUnmount(() => {
                         {{ m.name }}
                       </button>
                     </div>
+                  </template>
+                  <template #chart="{ setChipVisible }">
                     <div class="drawer-chart">
                       <MarketChart
                         :security="security"
@@ -1589,56 +1644,200 @@ onBeforeUnmount(() => {
                 <p v-if="performance[selected]?.reason" class="desk-warning">
                   {{ performance[selected].reason }}
                 </p>
-                <dl v-if="performance[selected]" class="impact-list">
-                  <div>
-                    <dt>日初持仓数量</dt>
-                    <dd>{{ performance[selected].quantityStart }}</dd>
+                <div v-if="performance[selected]" class="daily-review-rows">
+                  <div class="daily-review-row">
+                    <strong class="daily-review-label">日初</strong>
+                    <dl>
+                      <div>
+                        <dt>持仓数量</dt>
+                        <dd>{{ performance[selected].quantityStart }}</dd>
+                      </div>
+                      <div>
+                        <dt>昨收（不复权）</dt>
+                        <dd>
+                          {{ money(performance[selected].previousClose, 4) }}
+                        </dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div>
-                    <dt>上一交易日不复权收盘</dt>
-                    <dd>{{ money(performance[selected].previousClose, 4) }}</dd>
+                  <div class="daily-review-row">
+                    <strong class="daily-review-label">估值</strong>
+                    <dl>
+                      <div>
+                        <dt>日初持仓市值</dt>
+                        <dd>{{ money(performance[selected].startValue) }}</dd>
+                      </div>
+                      <div>
+                        <dt>当前 / 日末市值</dt>
+                        <dd>{{ money(performance[selected].endValue) }}</dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div>
-                    <dt>日初持仓市值</dt>
-                    <dd>{{ money(performance[selected].startValue) }}</dd>
+                  <div class="daily-review-row">
+                    <strong class="daily-review-label">现金流</strong>
+                    <dl>
+                      <div>
+                        <dt>卖出净收入</dt>
+                        <dd>＋{{ money(performance[selected].sells) }}</dd>
+                      </div>
+                      <div>
+                        <dt>买入总支出</dt>
+                        <dd class="daily-review-buy-value">
+                          <span>−{{ money(performance[selected].buys) }}</span>
+                          <small
+                            >含手续费
+                            {{ money(performance[selected].fees) }}</small
+                          >
+                        </dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div>
-                    <dt>当前 / 日末持仓市值</dt>
-                    <dd>{{ money(performance[selected].endValue) }}</dd>
+                  <div class="daily-review-row daily-review-result">
+                    <strong class="daily-review-label">结果</strong>
+                    <dl>
+                      <div class="daily-review-result-metric">
+                        <dt>当日收益</dt>
+                        <dd class="t-profit-value">
+                          <span :class="tone(performance[selected].profit)">{{
+                            money(performance[selected].profit)
+                          }}</span>
+                          <span
+                            class="t-profit-rate"
+                            :class="tone(performance[selected].profit)"
+                            >{{
+                              percent(dailyReturnPercent(performance[selected]))
+                            }}</span
+                          >
+                        </dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div>
-                    <dt>当日卖出净收入</dt>
-                    <dd>＋{{ money(performance[selected].sells) }}</dd>
+                </div>
+                <h3 class="detail-subheading">做T收益</h3>
+                <div v-if="selectedTradeAnalysis" class="t-profit-rows">
+                  <div class="t-profit-row">
+                    <strong class="t-profit-period">今日</strong>
+                    <dl>
+                      <div>
+                        <dt>做T收益</dt>
+                        <dd class="t-profit-value">
+                          <span
+                            :class="
+                              tone(selectedDayTPerformance?.profit ?? null)
+                            "
+                            >{{ money(selectedDayTPerformance?.profit) }}</span
+                          >
+                          <span
+                            class="t-profit-rate"
+                            :class="
+                              tone(selectedDayTPerformance?.profit ?? null)
+                            "
+                            >{{
+                              percent(
+                                selectedDayTPerformance?.returnRate ?? null,
+                              )
+                            }}</span
+                          >
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>配对数量</dt>
+                        <dd>{{ selectedDayTPerformance?.quantity ?? 0 }} 股</dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div>
-                    <dt>当日买入总支出</dt>
-                    <dd>−{{ money(performance[selected].buys) }}</dd>
+                  <div class="t-profit-row">
+                    <strong class="t-profit-period">本轮</strong>
+                    <dl>
+                      <div>
+                        <dt>做T收益</dt>
+                        <dd class="t-profit-value">
+                          <span :class="tone(selectedCurrentStage?.tProfit)">{{
+                            money(selectedCurrentStage?.tProfit)
+                          }}</span>
+                          <span
+                            class="t-profit-rate"
+                            :class="tone(selectedCurrentStage?.tProfit)"
+                            >{{
+                              percent(selectedCurrentStage?.tReturnRate ?? null)
+                            }}</span
+                          >
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>配对数量</dt>
+                        <dd>{{ selectedCurrentStage?.tQuantity ?? 0 }} 股</dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div>
-                    <dt>已包含手续费</dt>
-                    <dd>{{ money(performance[selected].fees) }}</dd>
+                  <div class="t-profit-row">
+                    <strong class="t-profit-period">累计</strong>
+                    <dl>
+                      <div>
+                        <dt>做T收益</dt>
+                        <dd class="t-profit-value">
+                          <span
+                            :class="tone(selectedTradeAnalysis.summary.tProfit)"
+                            >{{
+                              money(selectedTradeAnalysis.summary.tProfit)
+                            }}</span
+                          >
+                          <span
+                            class="t-profit-rate"
+                            :class="tone(selectedTradeAnalysis.summary.tProfit)"
+                            >{{
+                              percent(selectedTradeAnalysis.summary.tReturnRate)
+                            }}</span
+                          >
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>配对数量 / 交易日</dt>
+                        <dd class="t-profit-meta">
+                          <span
+                            >{{
+                              selectedTradeAnalysis.summary.tQuantity
+                            }}
+                            股</span
+                          >
+                          <span
+                            >{{ selectedTradeAnalysis.summary.tDays }} 天</span
+                          >
+                        </dd>
+                      </div>
+                    </dl>
                   </div>
+                </div>
+                <h3 class="detail-subheading">今日买入未T出部分</h3>
+                <dl
+                  v-if="selectedUnmatchedDayBuys"
+                  class="today-buy-position-row"
+                >
                   <div>
-                    <dt>该交易日收益</dt>
-                    <dd :class="tone(performance[selected].profit)">
-                      {{ money(performance[selected].profit) }}
+                    <dt>当前盈亏</dt>
+                    <dd class="t-profit-value">
+                      <span :class="tone(selectedUnmatchedDayBuys.profit)">{{
+                        money(selectedUnmatchedDayBuys.profit)
+                      }}</span>
+                      <span
+                        class="t-profit-rate"
+                        :class="tone(selectedUnmatchedDayBuys.profit)"
+                        >{{
+                          percent(selectedUnmatchedDayBuys.returnRate)
+                        }}</span
+                      >
                     </dd>
                   </div>
                   <div>
-                    <dt>该交易日收益率</dt>
-                    <dd :class="tone(performance[selected].profit)">
-                      {{
-                        dailyReturnPercent(performance[selected]) === null
-                          ? "—"
-                          : dailyReturnPercent(performance[selected]) + "%"
-                      }}
-                    </dd>
+                    <dt>未T出数量</dt>
+                    <dd>{{ selectedUnmatchedDayBuys.quantity }} 股</dd>
                   </div>
                 </dl>
                 <p class="data-note">
                   收益＝当前市值−日初市值＋卖出净收入−买入总支出。费用已包含，不再次扣除；不包含资金转账和利息。未记录的分红送转会影响准确性，不保证与券商完全一致。
                   收益率＝收益÷〔日初市值＋max(买入总支出−卖出净收入,
                   0)〕。基准缺失或分母≤0时显示“—”；这是本软件的日收益率口径，并非证券自身涨跌幅。
+                  “今日买入未T出部分”只统计今天买入后，尚未由今天的卖出完成做T配对的数量；当前盈亏按现价估值，并包含对应买入费用。
                 </p>
               </section>
               <KeepAlive :max="2">
@@ -1652,6 +1851,7 @@ onBeforeUnmount(() => {
                     detailTab === 'trades' ? selected : undefined
                   "
                   :history-read-only="detailTab === 'trades'"
+                  :history-price="marketQuotes[selected]?.latest"
                   :snapshot="snapshot"
                   @saved="saved"
                 />

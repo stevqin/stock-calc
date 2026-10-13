@@ -63,7 +63,16 @@ describe("交易台", () => {
     ] as const)
       insertRecord(
         a,
-        draftRecord(a, id, side, "10", "100", time, "", fee).entry,
+        draftRecord(
+          a,
+          id,
+          side,
+          "10",
+          "100",
+          time,
+          side === "sell" ? "用于核对阶段收益的完整备注" : "",
+          fee,
+        ).entry,
       );
     vi.mocked(loadAccount).mockResolvedValue({ account: a, revision: 4 });
     wrapper = mount(Workspace, {
@@ -78,25 +87,33 @@ describe("交易台", () => {
       global: { stubs: { MarketChart: true } },
     });
     await flushPromises();
-    const rows = () => wrapper.findAll(".ledger-history-table tbody tr");
+    const rows = () => wrapper.findAll(".trade-record-row");
     expect(rows()).toHaveLength(2);
+    expect(wrapper.findAll(".trade-stage-row")).toHaveLength(1);
+    expect(wrapper.find(".trade-history-summary").text()).toContain("总体收益");
     expect(wrapper.find("table.compact-history").exists()).toBe(true);
     expect(wrapper.findAll("col")).toHaveLength(8);
     expect(
       wrapper.findAll("col").map((col) => col.attributes("style")),
     ).toEqual([
       "width: 85px;",
+      "width: 82px;",
+      "width: 64px;",
+      "width: 64px;",
       "width: 60px;",
-      "width: 70px;",
-      "width: 70px;",
-      "width: 70px;",
-      "width: 90px;",
-      "width: 100px;",
+      "width: 78px;",
+      "width: 92px;",
       undefined,
     ]);
     expect(rows()[0].find("td:first-child > span").text()).toBe("2026-08-27");
     expect(rows()[0].find("td:first-child > small").text()).toBe("09:00:00");
-    expect(rows()[0].text()).toContain("清仓");
+    expect(rows()[0].text()).toContain("真清仓");
+    await rows()[0].find(".note-tooltip-anchor").trigger("mouseenter");
+    expect(
+      document.body.querySelector(".note-tooltip-popover")?.textContent,
+    ).toBe("用于核对阶段收益的完整备注");
+    await rows()[0].find(".note-tooltip-anchor").trigger("mouseleave");
+    expect(document.body.querySelector(".note-tooltip-popover")).toBeNull();
     expect(rows()[1].text()).toContain("买入");
     expect(wrapper.find(".record-actions").exists()).toBe(false);
     expect(wrapper.findAll("th").some((th) => th.text() === "证券")).toBe(

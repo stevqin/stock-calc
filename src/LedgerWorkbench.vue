@@ -18,6 +18,7 @@ import PriceChange from "./components/PriceChange.vue";
 import HistoryEditor from "./components/HistoryEditor.vue";
 import SecuritySearch from "./components/SecuritySearch.vue";
 import DateTimeField from "./components/DateTimeField.vue";
+import NoteTooltip from "./components/NoteTooltip.vue";
 import type { SecurityHit } from "./securitySearch";
 import type { HistoryTarget } from "./sim/history";
 import { QuotePoller, quoteAge, type Quote } from "./quotes";
@@ -52,6 +53,7 @@ import { readDraft, writeDraft, flushDrafts } from "./sim/drafts";
 import { upgradeWorkspace, addToWatchlist } from "./sim/workspaceState";
 import { marketQuotes } from "./market";
 import { tradeLabels } from "./sim/tradeLabels";
+import { analyzeTradeStages } from "./sim/tradeStages";
 import { cashTimeline, type CashTimelineRow } from "./sim/reconciliation";
 const props = defineProps<{
   embedded?: boolean;
@@ -59,6 +61,7 @@ const props = defineProps<{
   symbol?: string;
   historySecurityId?: string;
   historyReadOnly?: boolean;
+  historyPrice?: string;
   action?: "record" | "cash" | "opening" | "security";
   snapshot?: { account: Account; revision: number };
 }>();
@@ -147,6 +150,35 @@ const historyCompact = computed(
 const effectiveHistorySecurityId = computed(
   () => props.historySecurityId || historyFilterId.value,
 );
+const scopedTradeAnalysis = computed(() =>
+  historyCompact.value && effectiveHistorySecurityId.value
+    ? analyzeTradeStages(
+        account.value.entries,
+        effectiveHistorySecurityId.value,
+        props.historyPrice,
+      )
+    : null,
+);
+const compactStageHeaders = computed(() => {
+  const headers = new Map<
+    string,
+    NonNullable<typeof scopedTradeAnalysis.value>["stages"][number]
+  >();
+  for (const stage of scopedTradeAnalysis.value?.stages ?? []) {
+    const id = stage.entryIds.at(-1);
+    if (id) headers.set(id, stage);
+  }
+  return headers;
+});
+function compactTradeLabel(entry: Entry) {
+  return (
+    scopedTradeAnalysis.value?.classifications[entry.id]?.label ??
+    tradeTypeLabels.value[entry.id]
+  );
+}
+function compactTradeTitle(entry: Entry) {
+  return scopedTradeAnalysis.value?.classifications[entry.id]?.detail;
+}
 const tradeRows = computed(() =>
   account.value.entries
     .filter(
@@ -316,6 +348,28 @@ const ledger = computed(() =>
 const position = computed(() =>
   security.value ? ledger.value.positions[security.value.id] : undefined,
 );
+const sellablePositionAction = computed(() => {
+  const settlement = security.value?.settlement ?? "unconfirmed";
+  const quantity = new Decimal(position.value?.quantity ?? 0);
+  const available = new Decimal(position.value?.available ?? 0);
+  const remaining = Decimal.max(quantity.minus(available), 0);
+  const canClear =
+    settlement !== "unconfirmed" && quantity.gt(0) && available.eq(quantity);
+  let title: string;
+  if (canClear) {
+    title = `${settlement} · 当前持仓均可卖，卖出后持仓归零`;
+  } else if (settlement === "unconfirmed") {
+    title = `回转规则未确认；仅按账本估算填入今日可卖数量${remaining.gt(0) ? `，卖出后预计仍持有 ${money(remaining.toString(), 0)}` : ""}`;
+  } else {
+    title = `${settlement} · 仅填入今日可卖数量，卖出后预计仍持有 ${money(remaining.toString(), 0)}`;
+  }
+  return {
+    canClear,
+    label: canClear ? "清仓" : "全部可卖",
+    settlementLabel: settlement === "unconfirmed" ? "规则未确认" : settlement,
+    title,
+  };
+});
 const quote = computed(() =>
   security.value ? quotes[security.value.id] : undefined,
 );
@@ -1378,7 +1432,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               </button>
             </details>
             <div class="form-grid compact trade-main-fields">
-              <div class="step-field">
+              <div class="step-field trade-main-field">
                 <label class="step-label" for="trade-entry-price"
                   >成交价 · 元<PriceChange
                     :price="orderPrice"
@@ -1415,7 +1469,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   </button>
                 </div>
               </div>
-              <div class="step-field">
+              <div class="step-field trade-main-field">
                 <label class="step-label" for="trade-entry-quantity"
                   >成交股数 / 份数</label
                 >
@@ -1444,8 +1498,9 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   </button>
                 </div>
               </div>
-              <label class="trade-time"
-                >发生时间<DateTimeField
+              <label class="trade-time trade-main-field"
+                ><span class="step-label">发生时间</span
+                ><DateTimeField
                   v-model="tradeTime"
                   mode="datetime"
                   test-id="trade-time"
@@ -1475,46 +1530,69 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 恢复跟随现价
               </button>
             </div>
-            <div class="quote-fill">
-              <button
-                type="button"
-                :disabled="!quote?.bid"
-                @click="fill(quote?.bid)"
-              >
-                买一 {{ quote?.bid || "—" }}</button
-              ><button
-                type="button"
-                :disabled="!quote?.ask"
-                @click="fill(quote?.ask)"
-              >
-                卖一 {{ quote?.ask || "—" }}</button
-              ><button
-                type="button"
-                :disabled="!quote"
-                @click="fill(quote?.latest)"
-              >
-                最新
-              </button>
-            </div>
-            <div class="quantity-shortcuts">
-              <button
-                v-for="q in quantityShortcuts(orderPrice)"
-                :key="q"
-                type="button"
-                :class="{ chosen: orderQty === String(q) }"
-                @click="orderQty = String(q)"
-              >
-                {{ q }}
-              </button>
-              <button
-                type="button"
-                class="close-position"
-                :class="{ chosen: orderQty === position?.available }"
-                :disabled="!position || new Decimal(position.available).lte(0)"
-                @click="fillAvailablePosition"
-              >
-                清仓（全部可卖）
-              </button>
+            <div class="trade-quick-panel">
+              <section class="trade-quick-group">
+                <header><b>行情参考</b><small>点选填入</small></header>
+                <div class="quote-fill">
+                  <button
+                    type="button"
+                    :disabled="!quote?.bid"
+                    @click="fill(quote?.bid)"
+                  >
+                    <span>买一</span><strong>{{ quote?.bid || "—" }}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="!quote?.ask"
+                    @click="fill(quote?.ask)"
+                  >
+                    <span>卖一</span><strong>{{ quote?.ask || "—" }}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="!quote"
+                    @click="fill(quote?.latest)"
+                  >
+                    <span>最新</span><strong>{{ quote?.latest || "—" }}</strong>
+                  </button>
+                </div>
+              </section>
+              <section class="trade-quick-group">
+                <header>
+                  <b>成交数量</b>
+                  <small
+                    ><em class="trade-settlement-badge">{{
+                      sellablePositionAction.settlementLabel
+                    }}</em>
+                    持仓 {{ money(position?.quantity, 0) }} · 可卖
+                    {{ money(position?.available, 0) }}</small
+                  >
+                </header>
+                <div class="quantity-shortcuts">
+                  <button
+                    v-for="q in quantityShortcuts(orderPrice)"
+                    :key="q"
+                    type="button"
+                    :class="{ chosen: orderQty === String(q) }"
+                    @click="orderQty = String(q)"
+                  >
+                    {{ q }}
+                  </button>
+                  <button
+                    type="button"
+                    class="available-position"
+                    :class="{ chosen: orderQty === position?.available }"
+                    :disabled="
+                      !position || new Decimal(position.available).lte(0)
+                    "
+                    :title="sellablePositionAction.title"
+                    @click="fillAvailablePosition"
+                  >
+                    <span>{{ sellablePositionAction.label }}</span>
+                    <strong>{{ money(position?.available, 0) }}</strong>
+                  </button>
+                </div>
+              </section>
             </div>
             <div class="trade-fee-fields">
               <label
@@ -1550,7 +1628,7 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             /></label>
             <dl class="ticket-details">
               <div>
-                <dt>当前持仓 / 估算可卖</dt>
+                <dt>当前持仓 / 今日可卖（估算）</dt>
                 <dd>
                   {{ position?.quantity || 0 }} / {{ position?.available || 0 }}
                 </dd>
@@ -1946,6 +2024,36 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             只看异常前后
           </label>
         </section>
+        <section
+          v-if="historyCompact && scopedTradeAnalysis"
+          class="trade-history-summary"
+        >
+          <div>
+            <span>总体收益</span>
+            <b :class="tone(scopedTradeAnalysis.summary.profit)">{{
+              money(scopedTradeAnalysis.summary.profit)
+            }}</b>
+          </div>
+          <div>
+            <span>总体收益率</span>
+            <b :class="tone(scopedTradeAnalysis.summary.returnRate)">{{
+              percent(scopedTradeAnalysis.summary.returnRate)
+            }}</b>
+          </div>
+          <div>
+            <span>累计做T净收益</span>
+            <b :class="tone(scopedTradeAnalysis.summary.tProfit)">{{
+              money(scopedTradeAnalysis.summary.tProfit)
+            }}</b>
+          </div>
+          <div>
+            <span>持仓阶段</span>
+            <b>{{ scopedTradeAnalysis.summary.totalStages }} 段</b>
+            <small
+              >{{ scopedTradeAnalysis.summary.closedStages }} 段已真清仓</small
+            >
+          </div>
+        </section>
         <div class="ledger-table-viewport">
           <table
             v-if="historyMode === 'records' || historyReadOnly"
@@ -1954,12 +2062,12 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
           >
             <colgroup v-if="historyCompact">
               <col style="width: 85px" />
+              <col style="width: 82px" />
+              <col style="width: 64px" />
+              <col style="width: 64px" />
               <col style="width: 60px" />
-              <col style="width: 70px" />
-              <col style="width: 70px" />
-              <col style="width: 70px" />
-              <col style="width: 90px" />
-              <col style="width: 100px" />
+              <col style="width: 78px" />
+              <col style="width: 92px" />
               <col />
             </colgroup>
             <colgroup v-else>
@@ -1993,72 +2101,127 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
               </tr>
             </thead>
             <tbody>
-              <tr v-for="e in tradeRows" :key="e.id">
-                <td>
-                  <template v-if="historyCompact">
-                    <span>{{ e.date }}</span>
-                    <small>{{
-                      new Date(e.time).toLocaleTimeString("zh-CN", {
+              <template v-for="e in tradeRows" :key="e.id">
+                <tr
+                  v-if="historyCompact && compactStageHeaders.has(e.id)"
+                  class="trade-stage-row"
+                >
+                  <td colspan="8">
+                    <span>
+                      第 {{ compactStageHeaders.get(e.id)!.index }} 阶段 ·
+                      {{ compactStageHeaders.get(e.id)!.start }}
+                      <template
+                        v-if="
+                          compactStageHeaders.get(e.id)!.status === 'closed'
+                        "
+                      >
+                        — {{ compactStageHeaders.get(e.id)!.end }} · 已真清仓
+                      </template>
+                      <template v-else>至今 · 持仓中</template>
+                    </span>
+                    <span>
+                      收益
+                      <b :class="tone(compactStageHeaders.get(e.id)!.profit)">{{
+                        money(compactStageHeaders.get(e.id)!.profit)
+                      }}</b>
+                      · 收益率
+                      <b
+                        :class="tone(compactStageHeaders.get(e.id)!.returnRate)"
+                        >{{
+                          percent(compactStageHeaders.get(e.id)!.returnRate)
+                        }}</b
+                      >
+                      · 做T
+                      <b
+                        :class="tone(compactStageHeaders.get(e.id)!.tProfit)"
+                        >{{ money(compactStageHeaders.get(e.id)!.tProfit) }}</b
+                      >
+                    </span>
+                  </td>
+                </tr>
+                <tr class="trade-record-row">
+                  <td>
+                    <template v-if="historyCompact">
+                      <span>{{ e.date }}</span>
+                      <small>{{
+                        new Date(e.time).toLocaleTimeString("zh-CN", {
+                          timeZone: "Asia/Shanghai",
+                          hour12: false,
+                        })
+                      }}</small>
+                    </template>
+                    <template v-else>{{
+                      new Date(e.time).toLocaleString("zh-CN", {
                         timeZone: "Asia/Shanghai",
                         hour12: false,
                       })
+                    }}</template>
+                  </td>
+                  <td v-if="!historySecurityId">
+                    {{
+                      account.securities.find((s) => s.id === e.securityId)
+                        ?.name
+                    }}<small>{{ e.securityId }}</small>
+                  </td>
+                  <td
+                    :class="
+                      e.kind === 'buy'
+                        ? 'gain'
+                        : e.kind === 'sell'
+                          ? 'loss'
+                          : ''
+                    "
+                  >
+                    <span
+                      :title="historyCompact ? compactTradeTitle(e) : undefined"
+                      >{{
+                        historyCompact
+                          ? compactTradeLabel(e)
+                          : tradeTypeLabels[e.id]
+                      }}</span
+                    >
+                  </td>
+                  <td>
+                    {{ e.price }}
+                  </td>
+                  <td>{{ e.quantity }}</td>
+                  <td>{{ money(e.fees?.commission) }}</td>
+                  <td>
+                    {{ money(e.fees?.total)
+                    }}<small v-if="e.fees">{{
+                      e.feeSource === "actual" ? "交割单实录" : "费率估算"
                     }}</small>
-                  </template>
-                  <template v-else>{{
-                    new Date(e.time).toLocaleString("zh-CN", {
-                      timeZone: "Asia/Shanghai",
-                      hour12: false,
-                    })
-                  }}</template>
-                </td>
-                <td v-if="!historySecurityId">
-                  {{
-                    account.securities.find((s) => s.id === e.securityId)?.name
-                  }}<small>{{ e.securityId }}</small>
-                </td>
-                <td
-                  :class="
-                    e.kind === 'buy' ? 'gain' : e.kind === 'sell' ? 'loss' : ''
-                  "
-                >
-                  {{ tradeTypeLabels[e.id] }}
-                </td>
-                <td>
-                  {{ e.price }}
-                </td>
-                <td>{{ e.quantity }}</td>
-                <td>{{ money(e.fees?.commission) }}</td>
-                <td>
-                  {{ money(e.fees?.total)
-                  }}<small v-if="e.fees">{{
-                    e.feeSource === "actual" ? "交割单实录" : "费率估算"
-                  }}</small>
-                </td>
-                <td>
-                  {{
-                    e.fees
-                      ? (e.kind === "buy" ? "−" : "+") + money(e.fees.cash)
-                      : "实物转入"
-                  }}
-                </td>
-                <td>{{ e.note || "—" }}</td>
-                <td v-if="!historyReadOnly" class="record-actions">
-                  <button
-                    class="text-button"
-                    :disabled="saving"
-                    @click="openHistory('trade', e.id, 'edit')"
-                  >
-                    修改
-                  </button>
-                  <button
-                    class="text-button delete-link"
-                    :disabled="saving"
-                    @click="openHistory('trade', e.id, 'delete')"
-                  >
-                    删除
-                  </button>
-                </td>
-              </tr>
+                  </td>
+                  <td>
+                    {{
+                      e.fees
+                        ? (e.kind === "buy" ? "−" : "+") + money(e.fees.cash)
+                        : "实物转入"
+                    }}
+                  </td>
+                  <td class="trade-note">
+                    <NoteTooltip :text="e.note || ''">{{
+                      e.note || "—"
+                    }}</NoteTooltip>
+                  </td>
+                  <td v-if="!historyReadOnly" class="record-actions">
+                    <button
+                      class="text-button"
+                      :disabled="saving"
+                      @click="openHistory('trade', e.id, 'edit')"
+                    >
+                      修改
+                    </button>
+                    <button
+                      class="text-button delete-link"
+                      :disabled="saving"
+                      @click="openHistory('trade', e.id, 'delete')"
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
           <p

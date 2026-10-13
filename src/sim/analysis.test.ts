@@ -95,9 +95,12 @@ describe("analysis", () => {
     );
     expect(result.days[0].returnBase).toBe("1001.00");
     expect(result.days[0].returnRate).toBe("-0.10");
+    expect(result.days[0].contributions[0].returnRate).toBe("-0.10");
     expect(result.days[1].returnBase).toBe("1000.00");
     expect(result.days[1].returnRate).toBe("9.90");
+    expect(result.days[1].contributions[0].returnRate).toBe("9.90");
     expect(sum(result).returnRate).toBe("9.79");
+    expect(sum(result).contributions[0].returnRate).toBe("9.79");
     a.cashEntries = [];
     expect(
       sum(

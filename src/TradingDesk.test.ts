@@ -155,13 +155,17 @@ describe("重构工作台集成", () => {
     await start();
     wrapper.findComponent(SecuritiesTable).vm.$emit("detail", "sh510300");
     await flushPromises();
+    const panel = () => wrapper.find(".security-drawer");
+    await button("收益明细").trigger("click");
+    expect(panel().text()).toContain("本轮做T收益");
+    expect(panel().text()).toContain("累计做T收益");
     await button("交易记录").trigger("click");
     await flushPromises();
-    const panel = () => wrapper.find(".security-drawer");
     expect(
       panel().findComponent(LedgerWorkbench).props("historySecurityId"),
     ).toBe("sh510300");
-    expect(panel().findAll(".ledger-history-table tbody tr")).toHaveLength(1);
+    expect(panel().findAll(".trade-record-row")).toHaveLength(1);
+    expect(panel().findAll(".trade-stage-row")).toHaveLength(1);
     expect(panel().find(".ledger-history-table tbody").text()).toContain(
       "建仓",
     );
@@ -170,13 +174,130 @@ describe("重构工作台集成", () => {
     expect(panel().find(".planner").exists()).toBe(true);
     await button("交易记录").trigger("click");
     await flushPromises();
-    expect(panel().findAll(".ledger-history-table tbody tr")).toHaveLength(1);
+    expect(panel().findAll(".trade-record-row")).toHaveLength(1);
     await wrapper.find(".security-drawer-close").trigger("click");
     wrapper.findComponent(SecuritiesTable).vm.$emit("detail", "sh600519");
     await flushPromises();
     await button("交易记录").trigger("click");
     await flushPromises();
     expect(panel().text()).toContain("该证券暂无交易记录");
+  });
+  it("股票收益明细展示今日买入未T出部分的盈亏和收益率", async () => {
+    stored.entries.push(
+      {
+        id: "open-detail",
+        securityId: "sh510300",
+        kind: "opening",
+        quantity: "300",
+        available: "300",
+        price: "10",
+        time: "2026-08-27T01:00:00.000Z",
+        date: "2026-08-27",
+      },
+      {
+        id: "buy-detail",
+        securityId: "sh510300",
+        kind: "buy",
+        quantity: "200",
+        price: "9",
+        time: "2026-08-28T01:00:00.000Z",
+        date: "2026-08-28",
+        profile: { ...stored.profiles.etf },
+        feeSource: "actual",
+        fees: {
+          amount: "1800.00",
+          commission: "10.00",
+          transfer: "0.00",
+          stamp: "0.00",
+          total: "10.00",
+          cash: "1810.00",
+        },
+      },
+      {
+        id: "sell-detail",
+        securityId: "sh510300",
+        kind: "sell",
+        quantity: "100",
+        price: "10",
+        time: "2026-08-28T02:00:00.000Z",
+        date: "2026-08-28",
+        profile: { ...stored.profiles.etf },
+        feeSource: "actual",
+        fees: {
+          amount: "1000.00",
+          commission: "0.00",
+          transfer: "0.00",
+          stamp: "0.00",
+          total: "0.00",
+          cash: "1000.00",
+        },
+      },
+    );
+    marketQuotes.sh510300 = {
+      market: "sh",
+      code: "510300",
+      name: "测试ETF",
+      latest: "10",
+      bid: "10",
+      ask: "10",
+      quoteTime: "20260828150000",
+      fetchedAt: "2026-08-28T07:00:00Z",
+      kind: "etf",
+    };
+    marketCharts["sh510300:daily-raw"] = {
+      symbol: "sh510300",
+      mode: "daily-raw",
+      adjustment: "不复权",
+      fetchedAt: "2026-08-28T07:00:00Z",
+      sessions: [],
+      bars: [
+        {
+          date: "2026-08-27",
+          open: "10",
+          close: "10",
+          high: "10",
+          low: "10",
+          volume: "1000",
+        },
+      ],
+    };
+
+    await start();
+    expect(
+      wrapper.findComponent(SecuritiesTable).exists(),
+      wrapper.text(),
+    ).toBe(true);
+    wrapper.findComponent(SecuritiesTable).vm.$emit("detail", "sh510300");
+    await flushPromises();
+    await button("收益明细").trigger("click");
+    const panel = wrapper.find(".security-drawer");
+    const reviewRows = panel.findAll(".daily-review-row");
+    expect(reviewRows).toHaveLength(4);
+    expect(reviewRows[0].text()).toContain("日初");
+    expect(reviewRows[1].text()).toContain("估值");
+    expect(reviewRows[2].text()).toContain("现金流");
+    expect(reviewRows[2].text()).toContain("含手续费 10.00");
+    expect(reviewRows[3].text()).toContain("结果");
+    expect(reviewRows[3].text()).toContain("190.00");
+    expect(reviewRows[3].text()).toContain("4.99%");
+    const tRows = panel.findAll(".t-profit-row");
+    expect(tRows).toHaveLength(3);
+    expect(tRows[0].text()).toContain("今日");
+    expect(tRows[0].text()).toContain("95.00");
+    expect(tRows[0].text()).toContain("+10.50%");
+    expect(tRows[0].text()).toContain("100 股");
+    expect(tRows[1].text()).toContain("本轮");
+    expect(tRows[1].text()).toContain("+10.50%");
+    expect(tRows[2].text()).toContain("累计");
+    expect(tRows[2].text()).toContain("1 天");
+    const buyRow = panel.find(".today-buy-position-row");
+    expect(buyRow.exists()).toBe(true);
+    expect(panel.text()).toContain("今日买入未T出部分");
+    expect(buyRow.text()).toContain("当前盈亏");
+    expect(buyRow.text()).toContain("95.00");
+    expect(buyRow.text()).toContain("+10.50%");
+    expect(buyRow.text()).toContain("未T出数量");
+    expect(buyRow.text()).toContain("100 股");
   });
   it("顶部金额下方显示加权汇总收益率，缺报价时比例回退为空值", async () => {
     const items = [

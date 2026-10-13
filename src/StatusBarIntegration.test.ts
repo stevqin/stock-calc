@@ -70,10 +70,12 @@ it("publishes a summary, wakes background quotes, and removes native listeners o
     snapshot: expect.objectContaining({
       frames: [
         {
-          label: "合计",
-          change: "—",
+          label: "合计 ",
+          change: "",
+          dailyPercent: "—",
           profit: "¥0",
           changeTone: "flat",
+          dailyPercentTone: "flat",
           profitTone: "flat",
           stale: false,
         },

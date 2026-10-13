@@ -131,6 +131,7 @@ describe("盈亏分析日历", () => {
     wrapper = mount(PnlAnalysis, { props: { account, today: "2026-01-15" } });
     await flushPromises();
     expect(wrapper.text()).toContain("区间卖出盈亏");
+    expect(wrapper.get(".pnl-contribution").text()).toContain("区间收益率");
     expect(wrapper.get(".range-return").text()).toBe("+29.87%");
     expect(wrapper.findAll(".pnl-month-return")[0].text()).toBe("+29.87%");
     expect(wrapper.get('[data-date="2026-01-13"] .pnl-day-return').text()).toBe(
@@ -148,6 +149,60 @@ describe("盈亏分析日历", () => {
     expect(wrapper.get('[data-period="2026"] .pnl-period-return').text()).toBe(
       "+29.87%",
     );
+  });
+  it("贡献列表可等宽放大，并按盈亏和收益率切换排序", async () => {
+    const account = stockAccount();
+    account.entries.push({
+      ...account.entries[0],
+      id: "buy-second",
+      securityId: "sz159915",
+      price: "20",
+      fees: {
+        amount: "2000",
+        commission: "1",
+        stamp: "0",
+        transfer: "0",
+        total: "1",
+        cash: "2001",
+      },
+    });
+    vi.mocked(loadAnalysisHistory).mockImplementation(async (security) => {
+      if (security.id === "sh510300") return stockBars(security.id);
+      const chart = stockBars(security.id);
+      chart.bars = chart.bars.map((bar, index) => ({
+        ...bar,
+        open: String(20 - index),
+        high: String(20 - index),
+        low: String(20 - index),
+        close: String(20 - index),
+      }));
+      return chart;
+    });
+    wrapper = mount(PnlAnalysis, {
+      props: { account, today: "2026-01-15" },
+    });
+    await flushPromises();
+
+    const compactRows = () =>
+      wrapper.findAll(".pnl-contribution > .pnl-contribution-scroll tbody tr");
+    expect(compactRows()[0].text()).toContain("沪深300ETF");
+    expect(compactRows()[0].text()).toContain("+29.87%");
+
+    await wrapper.get('[data-contribution-sort="profit"]').trigger("click");
+    expect(compactRows()[0].text()).toContain("创业板ETF");
+    await wrapper.get('[data-contribution-sort="returnRate"]').trigger("click");
+    expect(compactRows()[0].text()).toContain("沪深300ETF");
+
+    await button("放大查看").trigger("click");
+    await flushPromises();
+    expect(
+      wrapper.get("dialog.pnl-contribution-dialog").attributes(),
+    ).toHaveProperty("open");
+    expect(wrapper.get(".pnl-contribution-dialog tbody").text()).toContain(
+      "创业板ETF",
+    );
+    await wrapper.get(".pnl-contribution-dialog-close").trigger("click");
+    expect(wrapper.find("dialog.pnl-contribution-dialog").exists()).toBe(false);
   });
   it.each([
     ["2025-11", "2025-11-03"],

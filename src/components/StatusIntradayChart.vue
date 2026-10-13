@@ -8,9 +8,12 @@ import {
   type MarketSecurity,
 } from "../market";
 import { chartSeries } from "../sim/chart";
+import { tradeMarkers } from "../sim/tradeMarkers";
+import type { StatusTrade } from "../statusBar";
 
 const props = defineProps<{
   security: MarketSecurity & { name: string };
+  trades?: StatusTrade[];
   active: boolean;
 }>();
 const key = computed(() => chartKey(props.security.id, "intraday"));
@@ -56,6 +59,17 @@ const geometry = computed(() => {
     pricePath: path(values.price, y),
     averagePath: path(values.average, y),
     baselineY: y(values.baseline.find((value) => value !== null) ?? min),
+    markers: tradeMarkers(data.value!, props.trades ?? []).map((marker) => {
+      const x = 7 + (marker.index / Math.max(1, values.price.length - 1)) * 262;
+      const anchorY = y(marker.anchor);
+      const direction = marker.side === "buy" ? 1 : -1;
+      return {
+        side: marker.side,
+        x,
+        anchorY,
+        badgeY: Math.max(7, Math.min(79, anchorY + direction * 11)),
+      };
+    }),
     volumes: values.volume.flatMap((value, index) => {
       if (value === null) return [];
       const height = Math.max(0.8, (value / volumeMax) * 22);
@@ -117,6 +131,39 @@ onBeforeUnmount(() => clearInterval(timer));
       />
       <path class="average-line" :d="geometry.averagePath" />
       <path class="price-line" :d="geometry.pricePath" />
+      <g
+        v-for="(marker, index) in geometry.markers"
+        :key="`${marker.side}-${index}`"
+        class="trade-marker"
+        :class="marker.side"
+      >
+        <line
+          :x1="marker.x"
+          :x2="marker.x"
+          :y1="marker.anchorY"
+          :y2="marker.badgeY"
+        />
+        <circle
+          class="marker-anchor"
+          :cx="marker.x"
+          :cy="marker.anchorY"
+          r="1.8"
+        />
+        <circle
+          class="marker-badge"
+          :cx="marker.x"
+          :cy="marker.badgeY"
+          r="6.5"
+        />
+        <text
+          :x="marker.x"
+          :y="marker.badgeY"
+          text-anchor="middle"
+          dominant-baseline="central"
+        >
+          {{ marker.side === "buy" ? "B" : "S" }}
+        </text>
+      </g>
       <line class="volume-divider" x1="7" x2="269" y1="82" y2="82" />
       <rect
         v-for="(bar, index) in geometry.volumes"
@@ -208,6 +255,36 @@ onBeforeUnmount(() => clearInterval(timer));
   stroke: #d39a2c;
   stroke-width: 0.85;
   opacity: 0.86;
+}
+.trade-marker line,
+.trade-marker .marker-anchor {
+  fill: #fff;
+  stroke-width: 1.1;
+  vector-effect: non-scaling-stroke;
+}
+.trade-marker .marker-badge {
+  stroke: #fff;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.trade-marker.buy line,
+.trade-marker.buy .marker-anchor {
+  stroke: var(--gain);
+}
+.trade-marker.buy .marker-badge {
+  fill: var(--gain);
+}
+.trade-marker.sell line,
+.trade-marker.sell .marker-anchor {
+  stroke: var(--loss);
+}
+.trade-marker.sell .marker-badge {
+  fill: var(--loss);
+}
+.status-chart-card .trade-marker text {
+  fill: #fff;
+  font-size: 7px;
+  font-weight: 700;
 }
 .volume-bar.up {
   fill: var(--gain);

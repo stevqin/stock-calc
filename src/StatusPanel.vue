@@ -62,6 +62,15 @@ async function openMain() {
     error.value = "主界面暂时无法打开，请重试";
   }
 }
+async function selectHolding(index: number) {
+  try {
+    activeIndex.value = await invoke<number>("set_status_active_index", {
+      index,
+    });
+  } catch {
+    error.value = "股票切换失败，请重试";
+  }
+}
 async function togglePause() {
   if (paused.value === null || changingPause.value) return;
   changingPause.value = true;
@@ -157,6 +166,7 @@ onBeforeUnmount(() => {
       v-if="chartHolding"
       :key="chartHolding.id"
       :security="chartHolding"
+      :trades="snapshot?.trades ?? []"
       :active="panelVisible"
     />
     <div class="holdings-scroll">
@@ -184,9 +194,14 @@ onBeforeUnmount(() => {
             :class="{ 'is-active': activeIndex === index }"
           >
             <td>
-              <strong :title="`${row.name} · ${row.id.toUpperCase()}`"
-                >{{ row.name }}<span v-if="row.stale"> *</span></strong
+              <button
+                type="button"
+                class="stock-switch"
+                :title="`切换到 ${row.name} · ${row.id.toUpperCase()}`"
+                @click="selectHolding(index)"
               >
+                <strong>{{ row.name }}<span v-if="row.stale"> *</span></strong>
+              </button>
               <small class="stock-code">{{ row.id.toUpperCase() }}</small>
               <label v-if="editing" class="alias-label"
                 >简称<input
@@ -195,7 +210,6 @@ onBeforeUnmount(() => {
                   @input="
                     drafts[row.id] = ($event.target as HTMLInputElement).value
                   "
-                  maxlength="12"
                   placeholder="留空恢复自动"
                   @change="alias(row.id, $event)"
               /></label>
@@ -337,10 +351,13 @@ body.status-panel-window {
   background: var(--hover);
   border-color: rgba(255, 255, 255, 0.4);
 }
-.status-panel button:focus-visible,
 .status-panel input:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: -2px;
+}
+.status-panel button:is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 .status-panel button:disabled {
   opacity: 0.45;
@@ -431,6 +448,24 @@ body.status-panel-window {
 .status-panel tbody tr.is-active {
   background: var(--selection);
   box-shadow: inset 2px 0 0 rgba(0, 122, 255, 0.6);
+}
+.status-panel .stock-switch,
+.status-panel .stock-switch:is(:hover, :active, :focus, :focus-visible) {
+  appearance: none;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  color: inherit;
+  text-align: left;
+}
+.status-panel .stock-switch:focus-visible strong {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .status-panel td strong {
   display: block;

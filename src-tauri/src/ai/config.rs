@@ -67,37 +67,55 @@ fn remove_from_defaults(db: &Connection, id: &str) -> AiResult<()> {
     }
     save_defaults(db, &d)
 }
-fn queue_cleanup(db: &Connection, r: &str) -> AiResult<()> {
-    if !r.is_empty() {
-        db.execute(
-            "INSERT OR IGNORE INTO ai_credential_cleanup(reference) VALUES(?1)",
-            [r],
-        )
-        .map_err(|_| AiError::storage())?;
-    }
-    Ok(())
+fn stored_key(db: &Connection, id: &str) -> AiResult<Option<String>> {
+    db.query_row(
+        "SELECT api_key FROM ai_model_keys WHERE model_id=?1",
+        [id],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|_| AiError::storage())
 }
-pub fn cleanup_pending(db: &Connection, secrets: &dyn SecretStore) -> AiResult<()> {
-    let mut stmt = db
-        .prepare("SELECT reference FROM ai_credential_cleanup")
-        .map_err(|_| AiError::storage())?;
-    let refs = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(|_| AiError::storage())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| AiError::storage())?;
-    drop(stmt);
-    for r in refs {
-        if secrets.delete(&r).is_ok() {
-            db.execute("DELETE FROM ai_credential_cleanup WHERE reference=?1", [r])
-                .map_err(|_| AiError::storage())?;
-        }
+fn valid_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 8192 && !key.contains(['\n', '\r'])
+}
+/// Copy readable legacy keys into SQLite. Returns the number still pending.
+/// Original keychain entries are retained; runtime calls read SQLite only.
+pub fn migrate_legacy_keys(db: &mut Connection, legacy: &dyn SecretStore) -> AiResult<usize> {
+    let rows = {
+        let mut stmt = db
+            .prepare("SELECT id,credential_ref FROM ai_models WHERE credential_ref<>''")
+            .map_err(|_| AiError::storage())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|_| AiError::storage())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AiError::storage())?;
+        rows
+    };
+    let mut pending = 0;
+    for (id, reference) in rows {
+        let key = match stored_key(db, &id)? {
+            Some(key) => key,
+            None => match legacy.get(&reference) {
+                Ok(key) if valid_key(&key) => key,
+                _ => {
+                    pending += 1;
+                    continue;
+                }
+            },
+        };
+        let tx = db.transaction().map_err(|_| AiError::storage())?;
+        tx.execute("INSERT INTO ai_model_keys(model_id,api_key) VALUES(?1,?2) ON CONFLICT(model_id) DO NOTHING", params![id,key])
+            .map_err(|_| AiError::storage())?;
+        tx.execute("UPDATE ai_models SET credential_ref='' WHERE id=?1", [&id])
+            .map_err(|_| AiError::storage())?;
+        tx.commit().map_err(|_| AiError::storage())?;
     }
-    Ok(())
+    Ok(pending)
 }
 pub fn save_model(
     db: &mut Connection,
-    secrets: &dyn SecretStore,
     input: ModelConfigInput,
     replacement: Option<String>,
 ) -> AiResult<ModelConfig> {
@@ -120,36 +138,25 @@ pub fn save_model(
         .as_ref()
         .map(|p| p.0.id.clone())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let old_key = stored_key(db, &id)?;
     if replacement.is_none() {
         if let Some((old, reference)) = &previous {
             let old_origin = reqwest::Url::parse(&old.base_url)
                 .map_err(|_| invalid("原API地址无效"))?
                 .origin();
             let new_origin = reqwest::Url::parse(&base_url).unwrap().origin();
-            if !reference.is_empty() && old_origin != new_origin {
+            if (old_key.is_some() || !reference.is_empty()) && old_origin != new_origin {
                 return Err(invalid("更换API主机时必须重新输入对应密钥"));
             }
         }
     }
-    let old_ref = previous.as_ref().map(|p| p.1.clone()).unwrap_or_default();
-    let replacement = replacement.map(|s| s.trim().to_string());
-    if replacement
-        .as_ref()
-        .is_some_and(|s| s.is_empty() || s.len() > 8192 || s.contains(['\n', '\r']))
-    {
-        return Err(invalid("密钥不能为空或包含换行"));
+    let key = replacement.map(|s| s.trim().to_string()).or(old_key);
+    if key.as_ref().is_some_and(|s| !valid_key(s)) {
+        return Err(invalid("密钥不能为空、超过长度限制或包含换行"));
     }
-    if replacement.is_none() && input.enabled {
-        if old_ref.is_empty() {
-            return Err(invalid("启用模型需要配置密钥"));
-        }
-        secrets.get(&old_ref)?;
+    if input.enabled && key.is_none() {
+        return Err(invalid("启用模型需要配置密钥；旧密钥迁移失败时请重新输入"));
     }
-    let new_ref = if replacement.is_some() {
-        uuid::Uuid::new_v4().to_string()
-    } else {
-        old_ref.clone()
-    };
     let config = ModelConfig {
         id,
         display_name: input.display_name.trim().into(),
@@ -158,99 +165,74 @@ pub fn save_model(
         base_url,
         enabled: input.enabled,
     };
-    if let Some(key) = &replacement {
-        secrets.set(&new_ref, key)?;
+    let legacy_ref = if key.is_some() {
+        String::new()
+    } else {
+        previous.map(|p| p.1).unwrap_or_default()
+    };
+    let tx = db.transaction().map_err(|_| AiError::storage())?;
+    tx.execute("INSERT INTO ai_models(id,payload,credential_ref) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,credential_ref=excluded.credential_ref",params![config.id,encode(&config)?,legacy_ref]).map_err(|_|AiError::storage())?;
+    if let Some(key) = key {
+        tx.execute("INSERT INTO ai_model_keys(model_id,api_key) VALUES(?1,?2) ON CONFLICT(model_id) DO UPDATE SET api_key=excluded.api_key",params![config.id,key]).map_err(|_|AiError::storage())?;
     }
-    let persist = (|| -> AiResult<()> {
-        let tx = db.transaction().map_err(|_| AiError::storage())?;
-        tx.execute("INSERT INTO ai_models VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,credential_ref=excluded.credential_ref",params![config.id,encode(&config)?,new_ref]).map_err(|_|AiError::storage())?;
-        if !config.enabled {
-            remove_from_defaults(&tx, &config.id)?;
-        }
-        if old_ref != new_ref {
-            queue_cleanup(&tx, &old_ref)?;
-        }
-        tx.commit().map_err(|_| AiError::storage())?;
-        Ok(())
-    })();
-    if let Err(e) = persist {
-        if replacement.is_some() {
-            let _ = secrets.delete(&new_ref);
-        }
-        return Err(e);
+    if !config.enabled {
+        remove_from_defaults(&tx, &config.id)?;
     }
-    cleanup_pending(db, secrets)?;
+    tx.commit().map_err(|_| AiError::storage())?;
     Ok(config)
 }
-pub fn delete_model(db: &mut Connection, secrets: &dyn SecretStore, id: &str) -> AiResult<()> {
-    let (_, reference) = existing(db, id)?;
+pub fn delete_model(db: &mut Connection, id: &str) -> AiResult<()> {
+    existing(db, id)?;
     let tx = db.transaction().map_err(|_| AiError::storage())?;
     remove_from_defaults(&tx, id)?;
-    queue_cleanup(&tx, &reference)?;
+    tx.execute("DELETE FROM ai_model_keys WHERE model_id=?1", [id])
+        .map_err(|_| AiError::storage())?;
     tx.execute("DELETE FROM ai_models WHERE id=?1", [id])
         .map_err(|_| AiError::storage())?;
     tx.commit().map_err(|_| AiError::storage())?;
-    cleanup_pending(db, secrets)?;
-    let remaining: i64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM ai_credential_cleanup WHERE reference=?1",
-            [reference],
-            |r| r.get(0),
-        )
-        .map_err(|_| AiError::storage())?;
-    if remaining > 0 {
-        return Err(AiError::new(
-            "cleanupPending",
-            "配置已删除，旧凭证清理失败；下次保存配置时将重试",
-        ));
-    }
     Ok(())
 }
-pub fn secret_for_model(
-    db: &Connection,
-    secrets: &dyn SecretStore,
-    id: &str,
-) -> AiResult<(ModelConfig, String)> {
-    let (c, r) = existing(db, id)?;
+pub fn secret_for_model(db: &Connection, id: &str) -> AiResult<(ModelConfig, String)> {
+    let (c, _) = existing(db, id)?;
     if !c.enabled {
         return Err(invalid("模型已禁用"));
     }
-    if r.is_empty() {
-        return Err(invalid("模型没有密钥"));
+    let key = stored_key(db, id)?.ok_or_else(|| {
+        AiError::new(
+            "missingSecret",
+            "SQLite 中没有可用密钥；旧密钥迁移失败时请编辑模型并重新输入 Key",
+        )
+    })?;
+    if !valid_key(&key) {
+        return Err(AiError::new(
+            "invalidSecret",
+            "数据库中的模型密钥无效，请重新配置",
+        ));
     }
-    let key = secrets.get(&r)?;
     Ok((c, key))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::{collections::HashMap, sync::Mutex};
     #[derive(Default)]
-    struct MemorySecrets {
-        data: Mutex<HashMap<String, String>>,
-        fail_set: bool,
-    }
-    impl SecretStore for MemorySecrets {
+    struct LegacySecrets(Mutex<HashMap<String, String>>);
+    impl SecretStore for LegacySecrets {
         fn set(&self, r: &str, s: &str) -> AiResult<()> {
-            if self.fail_set {
-                Err(AiError::new("secretStore", "安全存储不可用"))
-            } else {
-                self.data.lock().unwrap().insert(r.into(), s.into());
-                Ok(())
-            }
+            self.0.lock().unwrap().insert(r.into(), s.into());
+            Ok(())
         }
         fn get(&self, r: &str) -> AiResult<String> {
-            self.data
+            self.0
                 .lock()
                 .unwrap()
                 .get(r)
                 .cloned()
-                .ok_or_else(|| AiError::new("missingSecret", "密钥缺失"))
+                .ok_or_else(|| AiError::new("missingSecret", "旧密钥不可读取"))
         }
         fn delete(&self, r: &str) -> AiResult<()> {
-            self.data.lock().unwrap().remove(r);
+            self.0.lock().unwrap().remove(r);
             Ok(())
         }
     }
@@ -270,107 +252,127 @@ mod tests {
         }
     }
     #[test]
-    fn credentials_never_enter_sqlite_or_errors() {
+    fn sqlite_keys_are_persisted_but_never_in_public_config() {
         let mut db = setup();
-        let store = MemorySecrets::default();
-        let result = save_model(&mut db, &store, input(), Some("secret-fixture-123".into()));
-        assert!(result.is_ok());
-        let c = result.unwrap();
-        let payload: String = db
-            .query_row("SELECT payload FROM ai_models", [], |r| r.get(0))
+        let c = save_model(&mut db, input(), Some("secret-fixture-123".into())).unwrap();
+        let key: String = db
+            .query_row(
+                "SELECT api_key FROM ai_model_keys WHERE model_id=?1",
+                [&c.id],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert!(!payload.contains("secret-fixture-123"));
-        assert!(!serde_json::to_string(&c).unwrap().contains("credential"));
-        assert_eq!(
-            secret_for_model(&db, &store, &c.id).unwrap().1,
-            "secret-fixture-123"
-        );
-        let bad = MemorySecrets {
-            fail_set: true,
-            ..Default::default()
-        };
-        let error = save_model(&mut db, &bad, input(), Some("private-key".into())).unwrap_err();
-        assert!(!format!("{error:?}").contains("private-key"));
-        assert_eq!(list_models(&db).unwrap().len(), 1);
+        assert_eq!(key, "secret-fixture-123");
+        assert_eq!(secret_for_model(&db, &c.id).unwrap().1, key);
+        assert!(!serde_json::to_string(&list_models(&db).unwrap())
+            .unwrap()
+            .contains(&key));
+        assert!(!serde_json::to_string(&c).unwrap().contains(&key));
     }
     #[test]
-    fn editing_preserves_secret_and_replacement_uses_new_reference() {
+    fn editing_retains_and_replaces_key_atomically() {
         let mut db = setup();
-        let store = MemorySecrets::default();
-        let c = save_model(&mut db, &store, input(), Some("old".into())).unwrap();
+        let c = save_model(&mut db, input(), Some("old".into())).unwrap();
         let mut edit = input();
         edit.id = Some(c.id.clone());
         edit.display_name = "新名称".into();
-        save_model(&mut db, &store, edit.clone(), None).unwrap();
-        assert_eq!(secret_for_model(&db, &store, &c.id).unwrap().1, "old");
-        save_model(&mut db, &store, edit, Some("new".into())).unwrap();
-        assert_eq!(secret_for_model(&db, &store, &c.id).unwrap().1, "new");
-        assert_eq!(store.data.lock().unwrap().len(), 1);
+        save_model(&mut db, edit.clone(), None).unwrap();
+        assert_eq!(secret_for_model(&db, &c.id).unwrap().1, "old");
+        db.execute_batch("CREATE TRIGGER fail_keys BEFORE UPDATE ON ai_model_keys BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        edit.display_name = "should rollback".into();
+        let err = save_model(&mut db, edit.clone(), Some("replacement".into())).unwrap_err();
+        assert!(!format!("{err:?}").contains("replacement"));
+        assert_eq!(secret_for_model(&db, &c.id).unwrap().1, "old");
+        assert_eq!(list_models(&db).unwrap()[0].display_name, "新名称");
+        db.execute_batch("DROP TRIGGER fail_keys").unwrap();
+        save_model(&mut db, edit, Some("new".into())).unwrap();
+        assert_eq!(secret_for_model(&db, &c.id).unwrap().1, "new");
     }
     #[test]
-    fn defaults_only_accept_enabled_existing_models_and_delete_cleans_defaults() {
+    fn deletion_removes_key_and_defaults() {
         let mut db = setup();
-        let store = MemorySecrets::default();
-        let c = save_model(&mut db, &store, input(), Some("key".into())).unwrap();
-        let defaults = ModelDefaults {
-            participant_ids: vec![c.id.clone()],
-            summary_model_id: Some(c.id.clone()),
-        };
-        save_defaults(&db, &defaults).unwrap();
-        assert!(save_defaults(
+        let c = save_model(&mut db, input(), Some("key".into())).unwrap();
+        save_defaults(
             &db,
             &ModelDefaults {
-                participant_ids: vec!["unknown".into()],
-                summary_model_id: None
-            }
+                participant_ids: vec![c.id.clone()],
+                summary_model_id: Some(c.id.clone()),
+            },
         )
-        .is_err());
-        delete_model(&mut db, &store, &c.id).unwrap();
+        .unwrap();
+        delete_model(&mut db, &c.id).unwrap();
         assert_eq!(get_defaults(&db).unwrap(), ModelDefaults::default());
-        assert!(store.data.lock().unwrap().is_empty());
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM ai_model_keys", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
     #[test]
-    fn enabled_requires_secret_and_failed_write_leaves_old_key() {
+    fn host_changes_and_enabled_models_require_explicit_key() {
         let mut db = setup();
-        let store = MemorySecrets::default();
-        assert!(save_model(&mut db, &store, input(), None).is_err());
-        let c = save_model(&mut db, &store, input(), Some("old".into())).unwrap();
+        assert!(save_model(&mut db, input(), None).is_err());
+        let c = save_model(&mut db, input(), Some("old".into())).unwrap();
         let mut edit = input();
         edit.id = Some(c.id.clone());
-        let failing = MemorySecrets {
-            data: Mutex::new(store.data.lock().unwrap().clone()),
-            fail_set: true,
-        };
-        assert!(save_model(&mut db, &failing, edit, Some("replacement".into())).is_err());
-        assert_eq!(secret_for_model(&db, &store, &c.id).unwrap().1, "old");
-    }
-
-    #[test]
-    fn changing_host_requires_explicit_replacement_secret() {
-        let mut db = setup();
-        let store = MemorySecrets::default();
-        let c = save_model(&mut db, &store, input(), Some("old".into())).unwrap();
-        let mut edit = input();
-        edit.id = Some(c.id.clone());
-        edit.base_url = "https://different.example/v1".into();
-        assert!(save_model(&mut db, &store, edit.clone(), None).is_err());
+        edit.base_url = "https://other.example/v1".into();
+        assert!(save_model(&mut db, edit.clone(), None).is_err());
         assert_eq!(
             list_models(&db).unwrap()[0].base_url,
             "https://example.com/v1"
         );
-        assert!(save_model(&mut db, &store, edit, Some("new-host-key".into())).is_ok());
-    }
-
-    #[test]
-    fn disabled_draft_can_change_address_without_a_key() {
-        let mut db = setup();
-        let store = MemorySecrets::default();
+        save_model(&mut db, edit, Some("new-host-key".into())).unwrap();
         let mut draft = input();
         draft.enabled = false;
-        let c = save_model(&mut db, &store, draft.clone(), None).unwrap();
-        draft.id = Some(c.id);
+        let d = save_model(&mut db, draft.clone(), None).unwrap();
+        draft.id = Some(d.id);
         draft.base_url = "https://draft.example/v1".into();
-        assert!(save_model(&mut db, &store, draft, None).is_ok());
-        assert!(store.data.lock().unwrap().is_empty());
+        save_model(&mut db, draft, None).unwrap();
+    }
+    #[test]
+    fn migration_is_idempotent_and_unreadable_legacy_keys_remain_retryable() {
+        let mut db = setup();
+        let legacy = LegacySecrets::default();
+        legacy.set("legacy-ref", "existing-key").unwrap();
+        for (id, r) in [("one", "legacy-ref"), ("two", "missing-ref")] {
+            let c = ModelConfig {
+                id: id.into(),
+                display_name: id.into(),
+                provider: "custom".into(),
+                base_url: "https://example.com/v1".into(),
+                model: "test".into(),
+                enabled: true,
+            };
+            db.execute(
+                "INSERT INTO ai_models VALUES(?1,?2,?3)",
+                params![id, encode(&c).unwrap(), r],
+            )
+            .unwrap();
+        }
+        assert_eq!(migrate_legacy_keys(&mut db, &legacy).unwrap(), 1);
+        assert_eq!(secret_for_model(&db, "one").unwrap().1, "existing-key");
+        assert_eq!(existing(&db, "one").unwrap().1, "");
+        assert_eq!(existing(&db, "two").unwrap().1, "missing-ref");
+        assert!(secret_for_model(&db, "two").is_err());
+        assert_eq!(migrate_legacy_keys(&mut db, &legacy).unwrap(), 1);
+        legacy.set("missing-ref", "recovered-key").unwrap();
+        assert_eq!(migrate_legacy_keys(&mut db, &legacy).unwrap(), 0);
+        assert_eq!(secret_for_model(&db, "two").unwrap().1, "recovered-key");
+    }
+    #[test]
+    fn keys_survive_database_reopen() {
+        let path =
+            std::env::temp_dir().join(format!("tke-key-fixture-{}.sqlite3", uuid::Uuid::new_v4()));
+        let mut db = crate::storage::connect(path.clone()).unwrap();
+        let c = save_model(&mut db, input(), Some("persistent-fixture-key".into())).unwrap();
+        drop(db);
+        let db = crate::storage::connect(path.clone()).unwrap();
+        assert_eq!(
+            secret_for_model(&db, &c.id).unwrap().1,
+            "persistent-fixture-key"
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
 }

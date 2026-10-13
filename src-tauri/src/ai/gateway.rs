@@ -113,7 +113,7 @@ impl Gateway {
                 .timeout(Duration::from_secs(120))
                 .connect_timeout(Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
-                .user_agent("TCalculator/0.6 AI")
+                .user_agent(concat!("TCalculator/", env!("CARGO_PKG_VERSION"), " AI"))
                 .build()
                 .map_err(|_| error("connection", "无法初始化模型连接"))?,
             scheduler: Scheduler::new(),

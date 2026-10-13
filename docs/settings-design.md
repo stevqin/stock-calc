@@ -56,3 +56,11 @@ macOS 打包使用 Tauri app 构建与 ad-hoc 签名，再执行 codesign 和 DM
 The original AI worktree was incorrectly forked from local main based on v0.6.0 (`12eedf2`), which had not incorporated the released v0.8.0 commit `a8b04c2` from `panel-refresh-fix` / origin/main. This produced an AI package missing recent trading, chart, status-bar, reconciliation and PnL calendar features. All source changes and user database data remained intact.
 
 Merged the complete `a8b04c2` history into this AI worktree. Conflict resolution retains unified Settings but uses the v0.8.0 QuoteDetails / chart-tabs layout. The status bar, LedgerWorkbench, PnlAnalysis, StatusPanel, QuoteDetails, tradeStages, workspace.css and analysis.css are byte-identical to v0.8.0. The original checkout and the release worktree remain untouched. Combined regression: 483 frontend tests passed; Rust suite and typecheck passed. Future packages use this merged baseline.
+
+## SQLite API Key storage and v0.8.1 (2026-10-13)
+
+User explicitly requested storing API Keys in SQLite. This overrides the earlier OS keyring storage requirement. Keys are stored in the `ai_model_keys(model_id, api_key)` table with a foreign key to `ai_models`. Config and key insert/update/delete operations commit in one SQLite transaction; public ModelConfig DTOs remain credential-free. Account JSON backups remain account-only. Copying the full database includes plaintext Keys.
+
+Startup migrates readable legacy keys into SQLite and clears their active credential references in the same transaction. Existing keychain entries are retained; runtime requests and model list retrieval use SQLite only. Unreadable legacy entries retain references for a later startup retry; failed model tests provide safe guidance to re-enter the Key. Both normal and QA profiles use their own database and original keychain service. No raw key contents are logged or returned to the frontend.
+
+The patch version is 0.8.1 on the complete v0.8.0 baseline. All five version manifests/locks match; the footer and AI HTTP user agent derive their versions from the package manifests. Acceptance: 483 frontend tests, 64 Rust tests passed, typecheck and production build passed. SQLite tests cover public DTO exclusions, replacement rollback, key deletion, host change rules, migration retries/idempotency and reopen persistence.

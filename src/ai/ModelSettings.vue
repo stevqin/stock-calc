@@ -350,7 +350,11 @@ onBeforeUnmount(() => {
             :placeholder="
               form.id ? '留空保留已有密钥' : '输入模型服务密钥'
             " /></label
-        ><small>密钥保存到系统安全存储，不写入账本或分析报告。</small>
+        ><small
+          >密钥保存在本机 SQLite
+          数据库，输入框保持遮罩；复制数据库也会复制密钥。分析报告和账本 JSON
+          导出不包含密钥。</small
+        >
         <label class="ai-check"
           ><input
             v-model="form.enabled"

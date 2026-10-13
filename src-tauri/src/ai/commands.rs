@@ -9,14 +9,18 @@ use crate::storage::Store;
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 pub struct AiServices {
-    pub secrets: SystemSecrets,
     pub gateway: Gateway,
 }
 pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let legacy =
+        SystemSecrets::new(std::env::var("TCALCULATOR_QA_PROFILE").ok().as_deref() == Some("1"));
+    {
+        let store = app.state::<Store>();
+        let mut db = lock(&store).map_err(|e| std::io::Error::other(e.message))?;
+        config::migrate_legacy_keys(&mut db, &legacy)
+            .map_err(|e| std::io::Error::other(e.message))?;
+    }
     app.manage(AiServices {
-        secrets: SystemSecrets::new(
-            std::env::var("TCALCULATOR_QA_PROFILE").ok().as_deref() == Some("1"),
-        ),
         gateway: Gateway::new().map_err(|e| std::io::Error::other(e.message))?,
     });
     Ok(())
@@ -39,24 +43,14 @@ pub fn ai_save_defaults(store: tauri::State<'_, Store>, defaults: ModelDefaults)
 #[tauri::command]
 pub fn ai_save_model(
     store: tauri::State<'_, Store>,
-    services: tauri::State<'_, AiServices>,
     input: ModelConfigInput,
     replacement_secret: Option<String>,
 ) -> AiResult<ModelConfig> {
-    config::save_model(
-        &mut *lock(&store)?,
-        &services.secrets,
-        input,
-        replacement_secret,
-    )
+    config::save_model(&mut *lock(&store)?, input, replacement_secret)
 }
 #[tauri::command]
-pub fn ai_delete_model(
-    store: tauri::State<'_, Store>,
-    services: tauri::State<'_, AiServices>,
-    id: String,
-) -> AiResult<()> {
-    config::delete_model(&mut *lock(&store)?, &services.secrets, &id)
+pub fn ai_delete_model(store: tauri::State<'_, Store>, id: String) -> AiResult<()> {
+    config::delete_model(&mut *lock(&store)?, &id)
 }
 #[tauri::command]
 pub async fn ai_list_model_versions(
@@ -66,7 +60,7 @@ pub async fn ai_list_model_versions(
 ) -> AiResult<Vec<String>> {
     let (model, key) = {
         let db = lock(&store)?;
-        config::secret_for_model(&db, &services.secrets, &id)?
+        config::secret_for_model(&db, &id)?
     };
     services.gateway.list_model_versions(&model, &key).await
 }
@@ -85,7 +79,7 @@ pub async fn ai_test_model(
 ) -> AiResult<ModelTestResult> {
     let (model, key) = {
         let db = lock(&store)?;
-        config::secret_for_model(&db, &services.secrets, &id)?
+        config::secret_for_model(&db, &id)?
     };
     let response = services
         .gateway

@@ -15,3 +15,6 @@ CREATE INDEX IF NOT EXISTS ai_summaries_task ON ai_summaries(task_id);
 CREATE INDEX IF NOT EXISTS ai_tasks_status ON ai_tasks(status,seq);
 
 CREATE TABLE IF NOT EXISTS ai_credential_cleanup(reference TEXT PRIMARY KEY);
+
+CREATE TABLE IF NOT EXISTS ai_model_keys(model_id TEXT PRIMARY KEY REFERENCES ai_models(id) ON DELETE CASCADE,api_key TEXT NOT NULL);
+INSERT OR IGNORE INTO ai_schema VALUES(2);

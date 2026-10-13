@@ -130,6 +130,143 @@ beforeEach(() => {
   vi.mocked(invoke).mockResolvedValue(task);
 });
 describe("single stock AI drawer", () => {
+  it("shows all three strategy conclusions without opening model evidence", async () => {
+    const strategyTask = structuredClone(task);
+    strategyTask.summaryVersions[0].keyClaims = [
+      "conservative",
+      "intraday",
+      "swing",
+    ].map((strategy) => ({
+      strategy,
+      text: strategy + "操作与适用条件",
+      supports: [{ reportId: "r1", claimId: "c1" }],
+    }));
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [strategyTask],
+      nextCursor: null,
+    });
+    vi.mocked(loadTask).mockResolvedValue(strategyTask);
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    expect(w.findAll(".ai-operation-claim > h4").map((h) => h.text())).toEqual([
+      "稳健持仓",
+      "做 T",
+      "中短线",
+    ]);
+    for (const c of w.findAll(".ai-operation-claim")) {
+      expect(c.get("p").text()).toContain("操作与适用条件");
+      expect(c.get("details").attributes("open")).toBeUndefined();
+    }
+    expect(invoke).not.toHaveBeenCalled();
+    w.unmount();
+  });
+  it("keeps real execution stages expanded while analyzing", async () => {
+    const running: TaskDetail = {
+      ...task,
+      status: "analyzing",
+      reports: [],
+      summaryVersions: [],
+    };
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [running],
+      nextCursor: null,
+    });
+    vi.mocked(loadTask).mockResolvedValue(running);
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    expect(
+      w.get(".ai-execution-trace > details").attributes("open"),
+    ).toBeDefined();
+    expect(w.get(".ai-execution-trace").text()).toContain("正在执行");
+    w.unmount();
+  });
+  it("puts conclusions before diagnostics and folds completed reports", async () => {
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [task],
+      nextCursor: null,
+    });
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    const cards = w.findAll(".ai-drawer-scroll > section");
+    expect(
+      cards.findIndex((c) => c.classes().includes("ai-summary-card")),
+    ).toBeLessThan(
+      cards.findIndex((c) => c.classes().includes("ai-execution-trace")),
+    );
+    expect(
+      w.get(".ai-execution-trace > details").attributes("open"),
+    ).toBeUndefined();
+    expect(
+      w.get(".ai-model-report > details").attributes("open"),
+    ).toBeUndefined();
+    expect(w.get(".ai-claim > p").text()).toBe("关键判断");
+    expect(w.get(".ai-claim > details > summary").text()).toContain("模型依据");
+    expect((w.get(".ai-setup-body").element as HTMLElement).style.display).toBe(
+      "none",
+    );
+    w.unmount();
+  });
+  it("dismisses a hover tooltip before Escape can close the drawer", async () => {
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [task],
+      nextCursor: null,
+    });
+    const w = mount(StockAnalysisDrawer, {
+      props: { security },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    (w.get(".ai-close").element as HTMLElement).focus();
+    await w.get('button[aria-label="置信等级说明"]').trigger("mouseenter");
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+    await w.get(".ai-close").trigger("keydown", { key: "Escape" });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(w.emitted("close")).toBeUndefined();
+    w.unmount();
+  });
+  it("keeps the explanation visible while moving from trigger to tooltip", async () => {
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [task],
+      nextCursor: null,
+    });
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    vi.useFakeTimers();
+    const help = w.get('button[aria-label="置信等级说明"]');
+    await help.trigger("mouseenter");
+    await help.trigger("mouseleave");
+    document
+      .querySelector('[role="tooltip"]')!
+      .dispatchEvent(new MouseEvent("mouseenter"));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+    document
+      .querySelector('[role="tooltip"]')!
+      .dispatchEvent(new MouseEvent("mouseleave"));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    w.unmount();
+    vi.useRealTimers();
+  });
+  it("explains confidence with a keyboard accessible tooltip", async () => {
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [task],
+      nextCursor: null,
+    });
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    const help = w.get('button[aria-label="置信等级说明"]');
+    await help.trigger("focus");
+    expect(document.querySelector('[role="tooltip"]')!.textContent).toContain(
+      "不是经统计校准的概率",
+    );
+    await help.trigger("mouseleave");
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+    await help.trigger("keydown", { key: "Escape" });
+    expect(w.emitted("close")).toBeUndefined();
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    w.unmount();
+  });
   it("collapses setup immediately on start and can expand again", async () => {
     let resolve!: (value: TaskDetail) => void;
     vi.mocked(invoke).mockImplementationOnce(

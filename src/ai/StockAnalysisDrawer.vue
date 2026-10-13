@@ -9,6 +9,7 @@ import type {
   IndependentReport,
   SummaryVersion,
 } from "./types";
+import ReportTooltip from "./ReportTooltip.vue";
 import type { PositionContext } from "./positionContext";
 const props = defineProps<{
   security: SecurityRef;
@@ -103,6 +104,23 @@ const active = computed(
 const enabled = computed(() => models.value.filter((m) => m.enabled));
 const estimate = computed(() => selected.value.length + 1);
 const snapshot = computed(() => detail.value?.securitySnapshots[0]);
+const heldSnapshot = computed(() =>
+  snapshot.value?.evidence.find((e) => e.kind === "position"),
+);
+const missingSources = computed(() =>
+  Object.entries(
+    (snapshot.value?.sourceStates ?? {}) as Record<string, unknown>,
+  )
+    .filter(([, v]) => typeof v === "string" && v.startsWith("unavailable"))
+    .map(([k]) => sourceLabels[k] ?? k),
+);
+const todayLabel = computed(() =>
+  (snapshot.value?.windows as any)?.todayMode === "review"
+    ? "今日复盘"
+    : (snapshot.value?.windows as any)?.todayMode === "nonTradingDay"
+      ? "今日休市"
+      : "今日至收盘",
+);
 const summaries = computed(() => detail.value?.summaryVersions ?? []);
 const summaryId = ref("");
 const currentSummary = computed(
@@ -255,10 +273,7 @@ async function poll(taskId: string, token: number) {
   }
 }
 function watchTask(task: TaskDetail) {
-  if (
-    ["pending", "collecting", "analyzing", "summarizing"].includes(task.status)
-  )
-    setupCollapsed.value = true;
+  setupCollapsed.value = true;
   stop();
   detail.value = task;
   summaryId.value = "";
@@ -343,7 +358,7 @@ function keys(e: KeyboardEvent) {
       ...(root.value?.querySelectorAll<HTMLElement>(
         "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],summary",
       ) ?? []),
-    ];
+    ].filter((el) => el.getClientRects().length > 0);
     const first = elements[0],
       last = elements.at(-1);
     if (e.shiftKey && document.activeElement === first) {
@@ -414,9 +429,44 @@ onBeforeUnmount(() => {
           浏览器预览仅展示入口；请在桌面应用中运行分析。
         </p>
         <p v-if="error" role="alert" class="ai-message ai-error">{{ error }}</p>
+        <section v-if="detail" class="ai-report-toolbar">
+          <div class="ai-report-state">
+            <strong>{{ status[detail.status] }}</strong
+            ><small
+              >{{ detail.reports.length }}/{{
+                detail.requestSnapshot.participantIds.length
+              }}
+              份独立报告</small
+            ><ReportTooltip
+              label="报告完成状态"
+              text="完成状态表示分析流程是否结束；报告中的趋势与操作建议仍是模型判断。部分完成时请查看下方执行错误。"
+            />
+          </div>
+          <label v-if="history.length"
+            >历史报告<select
+              aria-label="历史报告"
+              :value="detail.id"
+              :disabled="active || loading"
+              @change="
+                watchTask(
+                  history.find(
+                    (t) => t.id === ($event.target as HTMLSelectElement).value,
+                  )!,
+                )
+              "
+            >
+              <option v-for="t in history" :key="t.id" :value="t.id">
+                {{ date(t.createdAt) }} · {{ status[t.status] }}
+              </option>
+            </select></label
+          >
+          <p v-for="(e, i) in detail.errors" :key="i" class="ai-error">
+            {{ e.message }}
+          </p>
+        </section>
         <section class="ai-settings-card ai-analysis-setup">
           <div class="ai-setup-header">
-            <h3>分析模型与资料</h3>
+            <h3>分析设置</h3>
             <button
               :aria-label="setupCollapsed ? '展开模型与资料' : '收起模型与资料'"
               :aria-expanded="!setupCollapsed"
@@ -445,17 +495,26 @@ onBeforeUnmount(() => {
                 />结合持仓与本轮交易记录</label
               >
               <p>
-                持仓 {{ positionContext.quantity }} 股 · 可卖
-                {{ positionContext.available }} 股 · FIFO均价
-                {{ positionContext.averageCost ?? "未知" }} · 摊薄成本
-                {{ positionContext.dilutedCost ?? "未知" }} ·
+                持仓 {{ positionContext.quantity }}
+                {{ security.asset === "etf" ? "份" : "股" }} · 可卖
+                {{ positionContext.available }}
+                {{ security.asset === "etf" ? "份" : "股" }} · FIFO均价
+                {{ positionContext.averageCost ?? "未知"
+                }}<ReportTooltip
+                  label="FIFO均价"
+                  text="按先进先出顺序计算剩余持仓成本，含账本已记录费用。卖出收益不会直接摊入该均价。"
+                />
+                · 摊薄成本 {{ positionContext.dilutedCost ?? "未知"
+                }}<ReportTooltip
+                  label="摊薄成本"
+                  text="本轮净投入除以当前持仓数量，会受到本轮卖出回款的影响；并不等于下一笔交易扣费后的保本价。"
+                />
+                ·
                 {{ positionContext.settlement }}
               </p>
               <p>
                 本轮起于 {{ date(positionContext.roundStart) }}，共
-                {{
-                  positionContext.trades.length
-                }}
+                {{ positionContext.trades.length }}
                 笔记录。将向所选独立模型与汇总模型发送本股持仓、交易、费用及备注，并随报告本地保存。
               </p>
               <details>
@@ -541,148 +600,42 @@ onBeforeUnmount(() => {
               {{
                 active ? "分析进行中" : detail ? "重新分析" : "开始分析"
               }}</button
-            ><button v-if="active" @click="cancel">取消分析</button
+            ><ReportTooltip
+              label="重新分析"
+              text="重新采集行情和当前勾选的持仓资料，再调用独立模型和汇总模型生成新报告。会产生新的API调用费用。"
+            /><button v-if="active" @click="cancel">取消分析</button
             ><button
               v-if="validReports.length"
               :disabled="active || loading || !summary"
               @click="resummarize"
             >
-              重新汇总 · 预计 1 次
-            </button>
+              重新汇总 · 预计 1 次</button
+            ><ReportTooltip
+              v-if="validReports.length"
+              label="重新汇总"
+              text="使用这份历史报告已保存的资料和独立模型报告，只重新调用汇总模型。不会读取最新行情或最新持仓；如需更新资料，请重新分析。"
+            />
           </div>
         </section>
-        <section
-          v-if="history.length"
-          class="ai-settings-card ai-analysis-history"
-        >
-          <h3>历史报告</h3>
-          <select
-            aria-label="历史报告"
-            :value="detail?.id"
-            :disabled="active || loading"
-            @change="
-              watchTask(
-                history.find(
-                  (t) => t.id === ($event.target as HTMLSelectElement).value,
-                )!,
-              )
-            "
-          >
-            <option v-for="t in history" :key="t.id" :value="t.id">
-              {{ date(t.createdAt) }} · {{ status[t.status] }}
-            </option></select
-          ><small
-            >打开历史不会调用模型；关闭抽屉后任务继续运行，报告长期保存在本机。</small
-          >
-        </section>
-        <section
-          v-if="detail"
-          class="ai-settings-card ai-execution-trace"
-          aria-label="分析执行过程"
-        >
-          <div class="ai-trace-header">
-            <h3>分析过程</h3>
-            <small>执行记录 · 数据工具、模型调用与校验</small>
-          </div>
-          <p v-if="!traceRows.length">
-            {{
-              active
-                ? "正在启动任务，等待阶段记录…"
-                : "该历史报告未保存阶段记录，可查看调用明细和报告依据。"
-            }}
+        <section v-if="snapshot" class="ai-report-context">
+          <p>
+            <strong>{{ todayLabel }}</strong> · 报告参考价
+            {{ snapshot.referencePrice ?? "不可用" }} · 数据截止
+            {{ date(snapshot.cutoffAt)
+            }}<ReportTooltip
+              label="报告数据时间"
+              text="报告基于采集后冻结保存的资料。打开历史或重新汇总不会把报价与持仓更新到当前时间。行情数据本身也可能延迟。"
+            />
           </p>
-          <ol v-if="traceRows.length" class="ai-trace-list">
-            <li
-              v-for="row in traceRows"
-              :key="row.stage"
-              :class="['trace-' + row.state]"
+          <p class="ai-data-gap">
+            新闻正文未自动获取；公告仅标题和链接。<span
+              v-if="missingSources.length"
+              >另缺少：{{ missingSources.join("、") }}。</span
             >
-              <div>
-                <strong>{{ row.label }}</strong
-                ><span>{{ eventState(row) }} · {{ elapsed(row) }}</span>
-              </div>
-              <p>{{ row.detail }}</p>
-            </li>
-          </ol>
-          <small v-if="(detail.progress as any)?.eventsTruncated"
-            >仅显示最近1000条阶段记录，模型调用记录仍保留。</small
-          >
-          <details v-if="callRows.length">
-            <summary>模型调用明细 · {{ attemptedCalls }} 次尝试</summary>
-            <p v-for="(call, i) in callRows" :key="i">
-              {{ call.modelName ?? modelName(call.modelId) }} ·
-              {{ roleLabels[call.role] ?? call.role }} · 第
-              {{ call.attempt }} 次尝试 ·
-              {{
-                call.phase === "sending"
-                  ? active
-                    ? "已发送，等待响应"
-                    : "未记录响应"
-                  : "已收到服务商响应"
-              }}
-              · {{ date(call.at) }}
-            </p>
-          </details>
-        </section>
-        <section v-if="detail" class="ai-analysis-status">
-          <strong>{{ status[detail.status] }}</strong
-          ><span
-            >已发起 {{ attemptedCalls }} 次模型调用 ·
-            {{ detail.reports.length }}/{{
-              detail.requestSnapshot.participantIds.length
-            }}
-            份独立报告</span
-          >
-          <p v-for="(e, i) in detail.errors" :key="i" class="ai-error">
-            {{ e.message }}
           </p>
-        </section>
-        <section v-if="snapshot" class="ai-settings-card">
-          <h3>冻结数据与预测窗口</h3>
-          <p>
-            数据截止 {{ date(snapshot.cutoffAt) }} · 参考价格
-            {{ snapshot.referencePrice ?? "不可用" }}
+          <p v-if="positionContext && !heldSnapshot" class="ai-data-gap">
+            这份历史报告未包含持仓资料。重新分析后可生成三种持仓操作建议。
           </p>
-          <p>
-            {{
-              (snapshot.windows as any).todayMode === "review"
-                ? "今日已收盘：复盘已发生走势"
-                : (snapshot.windows as any).todayMode === "nonTradingDay"
-                  ? "今日休市：不预测今日收盘"
-                  : "预测从数据截止到今日收盘"
-            }}；未来窗口：{{
-              arr((snapshot.windows as any).futureDates).join("、")
-            }}
-          </p>
-          <details>
-            <summary>数据来源与完整性</summary>
-            <dl>
-              <template
-                v-for="(state, name) in snapshot.sourceStates as any"
-                :key="name"
-                ><dt>{{ sourceLabels[String(name)] ?? name }}</dt>
-                <dd>{{ sourceState(state) }}</dd></template
-              >
-            </dl>
-            <p>
-              新闻正文未自动采集；公告目前只读取列表与链接。手动资料未经独立核验，置信等级是模型判断，尚未经统计校准。
-            </p>
-            <details v-for="e in snapshot.evidence" :key="e.id">
-              <summary>
-                {{ e.source }} · {{ e.kind }} ·
-                {{ availabilityLabels[e.availability] ?? e.availability }}
-              </summary>
-              <a
-                v-if="e.url?.startsWith('https://')"
-                :href="e.url"
-                @click.prevent="openSource(e.url)"
-                target="_blank"
-                rel="noopener noreferrer"
-                >查看来源</a
-              >
-              <pre>{{ e.content }}</pre>
-            </details>
-          </details>
         </section>
         <section v-if="currentSummary" class="ai-settings-card ai-summary-card">
           <div class="ai-summary-heading">
@@ -702,89 +655,300 @@ onBeforeUnmount(() => {
               currentSummary.version
             }}</small
           >
-          <p v-if="validReports.length === 1">
-            仅有一个有效独立模型；本次汇总不代表多模型共识。
+          <p v-if="validReports.length === 1" class="ai-data-gap">
+            仅有一个有效独立模型，本次汇总不代表多模型共识。
+          </p>
+          <p v-if="active" class="ai-data-gap">
+            正在生成新的汇总，下方仍是已保存版本。
           </p>
           <p class="ai-prose">{{ (currentSummary.windows as any).overview }}</p>
-          <details
-            v-for="(claim, i) in arr(currentSummary.keyClaims)"
-            :key="i"
-            class="ai-claim"
-          >
-            <summary>
-              {{
-                strategyLabels[claim.strategy]
-                  ? strategyLabels[claim.strategy] + " · "
-                  : ""
-              }}{{ claim.text }}<small>{{ agreement(claim) }}</small>
-            </summary>
-            <article v-for="row in supportRows(claim)" :key="row.report!.id">
-              <strong>{{ row.report!.modelSnapshot.displayName }}</strong>
-              <p>{{ row.original.text }}</p>
+          <div class="ai-key-claims">
+            <article
+              v-for="(claim, i) in arr(currentSummary.keyClaims)"
+              :key="i"
+              :class="[
+                'ai-claim',
+                { 'ai-operation-claim': strategyLabels[claim.strategy] },
+              ]"
+            >
+              <h4>
+                {{ strategyLabels[claim.strategy] ?? "关键判断 " + (i + 1) }}
+              </h4>
+              <p class="ai-prose">{{ claim.text }}</p>
               <details>
-                <summary>引用资料</summary>
-                <pre
-                  v-for="e in snapshot?.evidence.filter((e) =>
-                    arr(row.original.evidenceIds).includes(e.id),
-                  )"
-                  :key="e.id"
-                  >{{ e.source }} · {{
-                    availabilityLabels[e.availability] ?? e.availability
-                  }}
-{{ e.content }}</pre>
+                <summary>
+                  展开模型依据 <small>{{ agreement(claim) }}</small
+                  ><ReportTooltip
+                    label="模型依据数量"
+                    text="计数只表示多少个独立模型被引用为该结论提供依据。没有被引用不代表赞同；只有一个有效模型时不构成多模型共识。"
+                  />
+                </summary>
+                <article
+                  v-for="row in supportRows(claim)"
+                  :key="row.report!.id"
+                  class="ai-model-support"
+                >
+                  <strong>{{ row.report!.modelSnapshot.displayName }}</strong
+                  ><small> · {{ row.report!.modelSnapshot.model }}</small>
+                  <p class="ai-prose">{{ row.original.text }}</p>
+                  <template v-if="strategyLabels[row.original.strategy]"
+                    ><dl class="ai-condition-list">
+                      <dt>触发条件</dt>
+                      <dd>{{ row.original.trigger }}</dd>
+                      <dt>失效条件</dt>
+                      <dd>{{ row.original.invalidation }}</dd>
+                      <dt>数量依据</dt>
+                      <dd>{{ row.original.quantityBasis }}</dd>
+                      <dt>费用影响</dt>
+                      <dd>{{ row.original.feeImpact }}</dd>
+                    </dl></template
+                  >
+                  <details>
+                    <summary>
+                      查看引用资料 ·
+                      {{ arr(row.original.evidenceIds).length }} 项
+                    </summary>
+                    <div
+                      v-for="e in snapshot?.evidence.filter((e) =>
+                        arr(row.original.evidenceIds).includes(e.id),
+                      )"
+                      :key="e.id"
+                    >
+                      <strong>{{ e.source }}</strong
+                      ><small>
+                        ·
+                        {{
+                          availabilityLabels[e.availability] ?? e.availability
+                        }}</small
+                      >
+                      <pre>{{ e.content }}</pre>
+                    </div>
+                  </details>
+                </article>
               </details>
             </article>
-          </details>
-          <div v-if="arr(currentSummary.disagreements).length">
-            <h4>模型分歧</h4>
+          </div>
+          <div
+            v-if="arr(currentSummary.disagreements).length"
+            class="ai-disagreements"
+          >
+            <h4>主要分歧</h4>
             <p v-for="(d, i) in arr(currentSummary.disagreements)" :key="i">
               {{ d }}
             </p>
           </div>
         </section>
         <section
+          v-if="validReports.length"
+          class="ai-settings-card ai-trend-comparison"
+        >
+          <h3>
+            趋势对比<ReportTooltip
+              label="置信等级"
+              text="置信等级是各模型对自身判断的描述，不是经统计校准的概率，也不等于模型之间的一致程度。"
+            />
+          </h3>
+          <div class="ai-trend-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>独立模型</th>
+                  <th>{{ todayLabel }}</th>
+                  <th>未来 1～5 交易日</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in validReports" :key="r.id">
+                  <th>{{ r.modelSnapshot.displayName }}</th>
+                  <td v-for="h in ['today', 'future']" :key="h">
+                    <span
+                      v-for="w in arr(r.windows).filter((w) => w.horizon === h)"
+                      :key="w.horizon"
+                      :class="'ai-direction-' + w.direction"
+                      >{{ direction[w.direction]
+                      }}<small
+                        >置信：{{ confidence[w.confidence] }}</small
+                      ></span
+                    >
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="ai-muted">判断依据与失效条件可展开下方独立报告查看。</p>
+        </section>
+        <section
           v-for="report in detail?.reports"
           :key="report.id"
-          class="ai-settings-card"
+          class="ai-settings-card ai-model-report"
         >
-          <h3>{{ report.modelSnapshot.displayName }} · 独立分析</h3>
-          <small
-            >{{ report.modelSnapshot.model }} ·
-            {{
-              (report.validation as any).valid
-                ? "结构与引用校验通过"
-                : "输出校验失败，不进入汇总"
-            }}</small
-          >
-          <p class="ai-prose">{{ overview(report) }}</p>
-          <article
-            v-for="w in arr(report.windows)"
-            :key="w.horizon"
-            class="ai-report-window"
-          >
-            <h4>
-              {{ w.horizon === "today" ? "今日窗口" : "未来 1～5 个交易日" }} ·
-              {{ direction[w.direction] }}
-              <small>置信等级：{{ confidence[w.confidence] }}</small>
-            </h4>
-            <p>{{ w.logic }}</p>
-          </article>
-          <article
-            v-for="c in arr(report.claims).filter(
-              (c) => strategyLabels[c.strategy],
-            )"
-            :key="c.id"
-            class="ai-report-window"
-          >
-            <h4>{{ strategyLabels[c.strategy] }}</h4>
-            <p>{{ c.text }}</p>
-            <p>触发条件：{{ c.trigger }}</p>
-            <p>失效条件：{{ c.invalidation }}</p>
-            <p>数量依据：{{ c.quantityBasis }}；费用影响：{{ c.feeImpact }}</p>
-          </article>
           <details>
-            <summary>模型原始输出</summary>
-            <pre>{{ report.rawOutput }}</pre>
+            <summary>
+              <strong>{{ report.modelSnapshot.displayName }} · 独立报告</strong
+              ><small
+                >{{ report.modelSnapshot.model }} ·
+                {{
+                  (report.validation as any).valid
+                    ? "引用校验通过"
+                    : "校验失败，未进入汇总"
+                }}</small
+              ><ReportTooltip
+                label="引用校验"
+                text="校验检查输出结构、引用标识、时间窗口和持仓建议必填条件；不表示观点正确、预测会兑现或交易能够获利。"
+              />
+            </summary>
+            <p class="ai-prose">{{ overview(report) }}</p>
+            <article
+              v-for="w in arr(report.windows)"
+              :key="w.horizon"
+              class="ai-report-window"
+            >
+              <h4>
+                {{
+                  w.horizon === "today" ? todayLabel : "未来 1～5 个交易日"
+                }}
+                · {{ direction[w.direction] }}
+                <small>置信：{{ confidence[w.confidence] }}</small>
+              </h4>
+              <p>{{ w.logic }}</p>
+            </article>
+            <article
+              v-for="c in arr(report.claims).filter(
+                (c) => strategyLabels[c.strategy],
+              )"
+              :key="c.id"
+              class="ai-report-window"
+            >
+              <h4>{{ strategyLabels[c.strategy] }}</h4>
+              <p>{{ c.text }}</p>
+              <dl class="ai-condition-list">
+                <dt>触发条件</dt>
+                <dd>{{ c.trigger }}</dd>
+                <dt>失效条件</dt>
+                <dd>{{ c.invalidation }}</dd>
+                <dt>数量依据</dt>
+                <dd>{{ c.quantityBasis }}</dd>
+                <dt>费用影响</dt>
+                <dd>{{ c.feeImpact }}</dd>
+              </dl>
+            </article>
+            <details class="ai-raw-output">
+              <summary>模型原始输出 · JSON</summary>
+              <pre>{{ report.rawOutput }}</pre>
+            </details>
+          </details>
+        </section>
+        <section v-if="snapshot" class="ai-settings-card ai-source-details">
+          <details>
+            <summary>
+              资料与时间窗口
+              <small
+                >{{ snapshot.evidence.length }} 项资料 ·
+                {{ heldSnapshot ? "含持仓与本轮交易" : "未包含持仓" }}</small
+              >
+            </summary>
+            <p>
+              数据截止 {{ date(snapshot.cutoffAt) }} · 参考价格
+              {{ snapshot.referencePrice ?? "不可用" }}
+            </p>
+            <p>
+              {{
+                (snapshot.windows as any).todayMode === "review"
+                  ? "今日已收盘：复盘已发生走势"
+                  : (snapshot.windows as any).todayMode === "nonTradingDay"
+                    ? "今日休市：不预测今日收盘"
+                    : "预测从数据截止到今日收盘"
+              }}；未来窗口：{{
+                arr((snapshot.windows as any).futureDates).join("、")
+              }}
+            </p>
+            <dl>
+              <template
+                v-for="(state, name) in snapshot.sourceStates as any"
+                :key="name"
+                ><dt>{{ sourceLabels[String(name)] ?? name }}</dt>
+                <dd>{{ sourceState(state) }}</dd></template
+              >
+            </dl>
+            <p>
+              手动资料与账本记录未经独立核验。公告正文未读取，标题不等同于正文依据。
+            </p>
+            <details
+              v-for="e in snapshot.evidence"
+              :key="e.id"
+              class="ai-evidence"
+            >
+              <summary>
+                {{
+                  e.kind === "position" ? "当时的持仓与本轮交易记录" : e.source
+                }}
+                · {{ availabilityLabels[e.availability] ?? e.availability }}
+              </summary>
+              <a
+                v-if="e.url?.startsWith('https://')"
+                :href="e.url"
+                @click.prevent="openSource(e.url)"
+                target="_blank"
+                rel="noopener noreferrer"
+                >查看来源</a
+              >
+              <pre>{{ e.content }}</pre>
+            </details>
+          </details>
+        </section>
+        <section
+          v-if="detail"
+          class="ai-settings-card ai-execution-trace"
+          aria-label="分析执行过程"
+        >
+          <details :open="active">
+            <summary>
+              分析过程
+              <small
+                >{{ active ? "正在执行" : status[detail.status] }} ·
+                {{ attemptedCalls }} 次模型调用</small
+              >
+            </summary>
+            <p class="ai-muted">数据采集、模型请求与校验的真实执行记录。</p>
+            <p v-if="!traceRows.length">
+              {{
+                active
+                  ? "正在启动任务，等待阶段记录…"
+                  : "该历史报告未保存阶段记录，可查看调用明细和报告依据。"
+              }}
+            </p>
+            <ol v-if="traceRows.length" class="ai-trace-list">
+              <li
+                v-for="row in traceRows"
+                :key="row.stage"
+                :class="['trace-' + row.state]"
+              >
+                <div>
+                  <strong>{{ row.label }}</strong
+                  ><span>{{ eventState(row) }} · {{ elapsed(row) }}</span>
+                </div>
+                <p>{{ row.detail }}</p>
+              </li>
+            </ol>
+            <small v-if="(detail.progress as any)?.eventsTruncated"
+              >仅显示最近1000条阶段记录，模型调用记录仍保留。</small
+            >
+            <details v-if="callRows.length">
+              <summary>模型调用明细 · {{ attemptedCalls }} 次尝试</summary>
+              <p v-for="(call, i) in callRows" :key="i">
+                {{ call.modelName ?? modelName(call.modelId) }} ·
+                {{ roleLabels[call.role] ?? call.role }} · 第
+                {{ call.attempt }} 次尝试 ·
+                {{
+                  call.phase === "sending"
+                    ? active
+                      ? "已发送，等待响应"
+                      : "未记录响应"
+                    : "已收到服务商响应"
+                }}
+                · {{ date(call.at) }}
+              </p>
+            </details>
           </details>
         </section>
       </div>
@@ -1001,5 +1165,175 @@ h4 {
   border-top: 1px solid #e1e7ef;
   padding-top: 12px;
   margin-top: 8px;
+}
+
+.ai-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ai-report-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.ai-report-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.ai-report-toolbar select {
+  width: auto;
+  max-width: 300px;
+  font-size: 12px;
+}
+.ai-report-toolbar .ai-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+.ai-report-context {
+  padding: 0 4px;
+}
+.ai-report-context p {
+  margin: 0 0 6px;
+}
+.ai-stock-drawer .ai-data-gap {
+  font-size: 12px;
+  color: #825f26;
+  background: #fbf7ee;
+  padding: 8px 10px;
+  border-left: 2px solid #d5b46e;
+}
+.ai-stock-drawer .ai-muted {
+  color: #62748a;
+  font-size: 12px;
+}
+.ai-summary-card h3,
+.ai-trend-comparison h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.ai-summary-heading h3 {
+  margin-bottom: 0;
+}
+.ai-key-claims {
+  margin-top: 16px;
+}
+.ai-claim > h4 {
+  margin: 0 0 8px;
+  color: #243850;
+}
+.ai-claim > p {
+  margin: 0 0 10px;
+  color: #26384e;
+}
+.ai-claim > details > summary {
+  font-size: 12px;
+  color: #3268cf;
+}
+.ai-claim > details > summary small {
+  display: inline;
+  margin-left: 8px;
+}
+.ai-model-support {
+  padding: 14px;
+  background: #f6f8fb;
+  border-radius: 6px;
+  margin-top: 12px;
+}
+.ai-condition-list {
+  grid-template-columns: 72px 1fr;
+  line-height: 1.8;
+}
+.ai-condition-list dt {
+  color: #65758a;
+}
+.ai-operation-claim {
+  border-left: 3px solid #86a4cf;
+  padding-left: 14px;
+  margin-top: 8px;
+}
+.ai-disagreements {
+  padding: 12px 14px;
+  background: #fbf7ee;
+  border-radius: 6px;
+  margin-top: 12px;
+}
+.ai-disagreements h4 {
+  margin: 0 0 6px;
+}
+.ai-disagreements p {
+  margin: 6px 0;
+}
+.ai-model-report > details > summary,
+.ai-source-details > details > summary,
+.ai-execution-trace > details > summary {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.ai-model-report > details > summary > small,
+.ai-source-details > details > summary > small {
+  display: block;
+  margin-left: 17px;
+}
+.ai-trend-scroll {
+  overflow-x: auto;
+}
+.ai-trend-comparison table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+.ai-trend-comparison th,
+.ai-trend-comparison td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #e3e9f1;
+  font-weight: normal;
+}
+.ai-trend-comparison thead th {
+  font-size: 12px;
+  color: #65758a;
+}
+.ai-trend-comparison td small {
+  display: block;
+  margin-top: 3px;
+}
+.ai-direction-bullish {
+  color: #b34345;
+}
+.ai-direction-bearish {
+  color: #23836c;
+}
+.ai-direction-sideways,
+.ai-direction-uncertain {
+  color: #53667e;
+}
+.ai-source-details dl {
+  margin-top: 14px;
+}
+.ai-evidence,
+.ai-raw-output {
+  margin-top: 14px;
+}
+@media (max-width: 600px) {
+  .ai-drawer-scroll {
+    padding: 14px;
+    gap: 12px;
+  }
+  .ai-report-toolbar label {
+    width: 100%;
+  }
+  .ai-report-toolbar select {
+    flex: 1;
+    min-width: 0;
+  }
+  .ai-report-context p {
+    line-height: 1.8;
+  }
 }
 </style>

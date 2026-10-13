@@ -9,3 +9,5 @@ pub mod scheduler;
 mod test_server;
 
 pub mod commands;
+
+pub mod analysis;

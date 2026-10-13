@@ -115,7 +115,7 @@ pub async fn fetch_chart(
     }
     request_chart(&client, &market, &code, &mode).await
 }
-async fn request_chart(
+pub(crate) async fn request_chart(
     client: &reqwest::Client,
     market: &str,
     code: &str,

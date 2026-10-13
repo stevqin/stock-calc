@@ -26,6 +26,9 @@ import LedgerWorkbench from "./LedgerWorkbench.vue";
 import RecoveryCenter from "./components/RecoveryCenter.vue";
 import PnlAnalysis from "./PnlAnalysis.vue";
 import SettingsHub from "./components/SettingsHub.vue";
+import StockAnalysisDrawer from "./ai/StockAnalysisDrawer.vue";
+import type { SecurityRef } from "./ai/types";
+const aiSecurity = ref<SecurityRef | null>(null);
 import { clearAnalysisHistory } from "./analysisHistory";
 import { manualAccount, upgradeAccount } from "./sim/record";
 import { replay, validateAccount, validateSecurity } from "./sim/ledger";
@@ -247,6 +250,7 @@ const menuItems = computed(() => {
   const index = members.value.indexOf(checked.value[0]);
   return [
     { id: "detail", label: "查看详情", disabled: !single },
+    { id: "aiAnalysis", label: "AI 分析", disabled: !single },
     { id: "trade", label: "交易", disabled: !single || saving.value },
     { id: "planner", label: "做T测算", disabled: !single || saving.value },
     {
@@ -306,6 +310,7 @@ async function openRowMenu(target: { id: string; x: number; y: number }) {
   if (
     dialog.value ||
     drawer.value ||
+    aiSecurity.value ||
     !rows.value.some((s) => s.id === target.id)
   )
     return;
@@ -316,7 +321,19 @@ async function openRowMenu(target: { id: string; x: number; y: number }) {
   rowMenu.value = target;
 }
 function rowMenuAction(id: string) {
-  if (id === "detail") detail(selected.value);
+  if (id === "aiAnalysis") {
+    const target = securities.value.get(selected.value);
+    if (target) {
+      drawer.value = false;
+      aiSecurity.value = {
+        id: target.id,
+        market: target.market,
+        code: target.code,
+        name: target.name,
+        asset: target.asset,
+      };
+    }
+  } else if (id === "detail") detail(selected.value);
   else if (id === "trade") openRecord("record");
   else if (id === "planner" && checked.value.length === 1 && !saving.value) {
     detail(checked.value[0]);
@@ -1924,6 +1941,16 @@ onBeforeUnmount(() => {
       ><span v-if="saving">正在保存…</span>
     </footer>
     <FloatingNotice :message="toast" kind="info" :duration="3000" />
+    <StockAnalysisDrawer
+      v-if="aiSecurity"
+      :key="aiSecurity.id"
+      :security="aiSecurity"
+      @close="aiSecurity = null"
+      @settings="
+        aiSecurity = null;
+        page = 'settings';
+      "
+    />
     <RowContextMenu
       v-if="rowMenu"
       :key="rowMenu.id"

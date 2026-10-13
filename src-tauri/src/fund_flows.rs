@@ -120,7 +120,7 @@ fn parse(bytes: &[u8], symbols: &[super::Symbol]) -> Result<FundFlowBatch, Strin
     Ok(out)
 }
 
-async fn request(
+pub(crate) async fn request(
     client: &reqwest::Client,
     symbols: &[super::Symbol],
 ) -> Result<FundFlowBatch, String> {

@@ -75,6 +75,25 @@ beforeEach(() => {
 });
 afterEach(() => wrapper?.unmount());
 describe("重构工作台集成", () => {
+  it("opens single-stock AI analysis for the right-click target", async () => {
+    await start();
+    const table = wrapper.getComponent(SecuritiesTable);
+    const row = stored.securities[0]!;
+    table.vm.$emit("context", { id: row.id, x: 100, y: 100 });
+    await flushPromises();
+    const action = wrapper
+      .findAll(".row-menu-item")
+      .find((b) => b.text() === "AI 分析");
+    expect(action).toBeDefined();
+    await action!.trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".ai-stock-drawer").exists()).toBe(true);
+    expect(wrapper.get(".ai-stock-drawer").text()).toContain(row.name);
+    expect(wrapper.get(".ai-stock-drawer").text()).toContain("浏览器预览");
+    expect(
+      wrapper.find(".security-drawer:not(.ai-stock-drawer)").exists(),
+    ).toBe(false);
+  });
   it("盈亏分析是同级页面，切换日历和区间不保存账本或禁用导航", async () => {
     await start();
     vi.mocked(saveAccount).mockClear();

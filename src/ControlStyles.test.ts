@@ -61,15 +61,16 @@ it("顶部收益金额与收益率同一行基线对齐，收益率保留12px字
   expect(css(".summary-return").marginTop).toBe("0px");
   expect(css(".summary-values b").marginTop).toBe("0px");
 });
-it("抽屉交易表随容器分配列宽，长备注可换行且不截断金额", () => {
+it("抽屉交易表固定行高，长备注保持单行省略", () => {
   fixture.innerHTML =
-    '<table class="ledger-history-table compact-history"><tbody><tr><td>123456789.00</td><td>长备注</td></tr></tbody></table>';
+    '<table class="ledger-history-table compact-history"><tbody><tr class="trade-record-row"><td>123456789.00</td><td class="trade-note"><span class="note-tooltip-anchor">完整的长备注</span></td></tr></tbody></table>';
   expect(css("table").tableLayout).toBe("fixed");
   expect(css("table").width).toBe("100%");
   expect(css("table").minWidth).toBe("0");
-  expect(css("td").whiteSpace).toBe("normal");
-  expect(css("td").overflowWrap).toBe("anywhere");
-  expect(css("td").textOverflow).not.toBe("ellipsis");
+  expect(css("td").whiteSpace).toBe("nowrap");
+  expect(css("td").textOverflow).toBe("ellipsis");
+  expect(css(".trade-record-row").height).toBe("44px");
+  expect(css(".trade-note span").textOverflow).toBe("ellipsis");
 });
 it("历史成交与资金流水隔行换色，只改变背景不覆盖金额颜色", () => {
   fixture.innerHTML =
@@ -86,6 +87,17 @@ it("历史成交与资金流水隔行换色，只改变背景不覆盖金额颜�
   expect(css(".gain").color).toBe("rgb(198, 65, 75)");
   expect(css(".loss").color).toBe("rgb(72, 165, 121)");
   expect(css(".other td").backgroundColor).toBe("rgba(0, 0, 0, 0)");
+});
+it("历史与资金页只滚动表格区域，表头吸顶且操作列保持标准单元格", () => {
+  fixture.innerHTML =
+    '<section class="details"><div class="table-scroll ledger-tab-layout"><nav class="history-mode-tabs"></nav><div class="history-search-toolbar"></div><div class="ledger-table-viewport"><table class="ledger-history-table trade-history-table"><thead><tr><th>时间</th><th>操作</th></tr></thead><tbody><tr><td>今天</td><td class="record-actions"><button>修改</button></td></tr></tbody></table></div></div><div class="table-scroll ledger-tab-layout"><div class="ledger-table-viewport"><table class="ledger-history-table cash-history-table"><thead><tr><th>发生时间</th><th>操作</th></tr></thead></table></div></div></section>';
+  expect(css(".ledger-tab-layout").overflow).toBe("hidden");
+  expect(css(".ledger-table-viewport").overflow).toBe("auto");
+  expect(css(".history-mode-tabs").backgroundColor).toBe("rgb(252, 253, 255)");
+  expect(css(".trade-history-table th").top).toBe("0px");
+  expect(css(".cash-history-table th").top).toBe("0px");
+  expect(css(".ledger-history-table").borderCollapse).toBe("separate");
+  expect(css("td.record-actions").display).toBe("table-cell");
 });
 it("消息栈脱离页面流，位于对话框上方且按钮可操作", () => {
   fixture.innerHTML =
@@ -137,6 +149,81 @@ it("加减组件内部输入和按钮均为34px，外围边框组成36px", () =>
   expect(css("input").height).toBe("34px");
   expect(css("button").height).toBe("34px");
   expect(css("input").marginTop).toBe("0px");
+});
+it("交易快捷区使用连续选择轨道，选中态不伪装成主操作按钮", () => {
+  fixture.innerHTML =
+    '<div class="record-embedded"><div class="trade-quick-panel"><section class="trade-quick-group"><header><b>参考价格</b><small>点击填入成交价</small></header><div class="quote-fill"><button><span>买一</span><strong>1234.56</strong></button></div></section><section class="trade-quick-group"><div class="quantity-shortcuts"><button>100</button><button class="available-position"><span>全部可卖</span><strong>123,456</strong></button></div></section></div></div>';
+  expect(css(".trade-quick-panel").display).toBe("grid");
+  expect(css(".quantity-shortcuts").display).toBe("flex");
+  expect(css(".quantity-shortcuts").flexWrap).toBe("nowrap");
+  expect(["0", "0px"]).toContain(css(".quantity-shortcuts").gap);
+  expect(css(".quantity-shortcuts").overflow).toBe("hidden");
+  expect(["0", "0px"]).toContain(css(".quote-fill").gap);
+  expect(css(".quote-fill").overflow).toBe("hidden");
+  expect(css(".quote-fill button").flexDirection).toBe("row");
+  expect(css(".quote-fill button").height).toBe("29px");
+  expect(css(".available-position").flexDirection).toBe("row");
+  expect(css(".available-position").height).toBe("29px");
+  expect(css(".trade-quick-group > header").flexWrap).toBe("wrap");
+  expect(css(".trade-quick-group > header small").whiteSpace).toBe("normal");
+});
+it("做T测算的快捷数量沿用连续轨道与加深后的选中状态", () => {
+  fixture.innerHTML =
+    '<div class="planner planner-forward"><div class="planner-form"><div class="quantity-shortcuts"><button>100</button><button class="quantity-shortcut chosen">500</button><button>1000</button></div></div></div>';
+  expect(css(".quantity-shortcuts").display).toBe("flex");
+  expect(css(".quantity-shortcuts").flexWrap).toBe("nowrap");
+  expect(css(".quantity-shortcuts").overflow).toBe("hidden");
+  expect(css(".quantity-shortcuts").borderTopWidth).toBe("1px");
+  expect(css(".quantity-shortcut").height).toBe("29px");
+  expect(css(".quantity-shortcut.chosen").backgroundColor).toBe(
+    "rgb(223, 235, 252)",
+  );
+  expect(css(".quantity-shortcut.chosen").color).toBe("rgb(31, 82, 153)");
+});
+it("按钮在页面、抽屉和对话框获得焦点时不显示外框或光环", () => {
+  fixture.innerHTML =
+    '<button class="page-action">页面按钮</button><aside class="security-drawer"><button class="security-drawer-close">关闭抽屉</button><div class="step-control"><input><button>＋</button></div></aside><dialog class="desk-dialog" open><button autofocus>关闭对话框</button></dialog><nav class="planner-mode-tabs"><button>正向做T</button></nav>';
+
+  for (const selector of [
+    ".page-action",
+    ".security-drawer-close",
+    ".step-control button",
+    ".desk-dialog button",
+    ".planner-mode-tabs button",
+  ]) {
+    const button = fixture.querySelector<HTMLButtonElement>(selector)!;
+    button.focus();
+    expect(getComputedStyle(button).boxShadow, selector).toBe("none");
+  }
+  fixture.querySelector<HTMLButtonElement>(".step-control button")!.focus();
+  expect(["", "none"]).toContain(css(".step-control").boxShadow);
+  expect(style.textContent).toContain(".step-control:has(input:focus)");
+
+  const buttonFocusRules = Array.from(style.sheet!.cssRules).filter(
+    (rule): rule is CSSStyleRule =>
+      rule instanceof CSSStyleRule &&
+      rule.selectorText.includes("button") &&
+      rule.selectorText.includes("focus"),
+  );
+  expect(buttonFocusRules.length).toBeGreaterThan(0);
+  expect(
+    buttonFocusRules.some(
+      (rule) =>
+        rule.selectorText.startsWith("button:is(") &&
+        rule.selectorText.includes(":focus") &&
+        rule.selectorText.includes(":focus-visible") &&
+        rule.style.getPropertyValue("outline") === "none" &&
+        rule.style.getPropertyValue("box-shadow") === "none",
+    ),
+  ).toBe(true);
+  for (const rule of buttonFocusRules) {
+    expect(["", "none"], rule.selectorText).toContain(
+      rule.style.getPropertyValue("outline"),
+    );
+    expect(["", "none"], rule.selectorText).toContain(
+      rule.style.getPropertyValue("box-shadow"),
+    );
+  }
 });
 it("分组创建按钮按输入框底部对齐，不继承form顶部对齐", () => {
   fixture.innerHTML =

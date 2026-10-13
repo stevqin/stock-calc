@@ -30,23 +30,18 @@ onBeforeUnmount(close);
 </script>
 <template>
   <Teleport v-if="isHost" to="body">
-    <div class="floating-notices" aria-label="消息提示">
+    <div class="floating-notices">
       <div
         v-for="notice in noticeStack"
         :key="notice.id"
         class="floating-notice"
         :class="notice.kind"
-        :role="notice.kind === 'error' ? 'alert' : 'status'"
       >
-        <span class="notice-mark" aria-hidden="true">{{
+        <span class="notice-mark">{{
           notice.kind === "error" ? "!" : notice.kind === "warning" ? "!" : "✓"
         }}</span>
         <span class="notice-message">{{ notice.message }}</span>
-        <button
-          type="button"
-          :aria-label="notice.kind === 'error' ? '关闭错误提示' : '关闭提示'"
-          @click="notice.close"
-        >
+        <button type="button" class="notice-close" @click="notice.close">
           ×
         </button>
       </div>

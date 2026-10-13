@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import FloatingNotice from "./FloatingNotice.vue";
+import DateTimeField from "./DateTimeField.vue";
 import { computed, reactive } from "vue";
 import type { Account } from "../sim/model";
 import { localDateTime, fromShanghaiInput } from "../sim/model";
@@ -120,7 +121,10 @@ function submit() {
           :class="{ 'with-direction': trade && trade.kind !== 'opening' }"
         >
           <label
-            >发生时间<input v-model="time.value" type="datetime-local" step="1"
+            >发生时间<DateTimeField
+              v-model="time.value"
+              mode="datetime"
+              test-id="history-record-time"
           /></label>
           <label v-if="trade && trade.kind !== 'opening'"
             >成交方向<select v-model="tradeForm.kind">
@@ -216,11 +220,7 @@ function submit() {
           /></label>
         </template>
       </fieldset>
-      <div
-        v-if="preview.ledger"
-        class="history-impact"
-        aria-label="账本重算预览"
-      >
+      <div v-if="preview.ledger" class="history-impact">
         <b>全账户：当前 → {{ deleting ? "删除后" : "修改后" }}</b>
         <dl>
           <div>
@@ -234,7 +234,7 @@ function submit() {
             </dd>
           </div>
           <div>
-            <dt>FIFO已实现</dt>
+            <dt>累计卖出盈亏（FIFO）</dt>
             <dd>
               {{ money(before.realized) }} →
               {{ money(preview.ledger.realized) }}

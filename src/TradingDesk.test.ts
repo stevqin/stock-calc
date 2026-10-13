@@ -43,6 +43,11 @@ let stored: Account;
 let revision: number;
 const button = (name: string) =>
   wrapper.findAll("button").find((b) => b.text() === name)!;
+const groupCheckbox = (name: string) =>
+  wrapper
+    .findAll(".group-picker label")
+    .find((label) => label.text().includes(name))!
+    .find('input[type="checkbox"]');
 async function start() {
   wrapper = mount(TradingDesk, {
     attachTo: document.body,
@@ -150,13 +155,17 @@ describe("重构工作台集成", () => {
     await start();
     wrapper.findComponent(SecuritiesTable).vm.$emit("detail", "sh510300");
     await flushPromises();
+    const panel = () => wrapper.find(".security-drawer");
+    await button("收益明细").trigger("click");
+    expect(panel().text()).toContain("本轮做T收益");
+    expect(panel().text()).toContain("累计做T收益");
     await button("交易记录").trigger("click");
     await flushPromises();
-    const panel = () => wrapper.find(".security-drawer");
     expect(
       panel().findComponent(LedgerWorkbench).props("historySecurityId"),
     ).toBe("sh510300");
-    expect(panel().findAll(".ledger-history-table tbody tr")).toHaveLength(1);
+    expect(panel().findAll(".trade-record-row")).toHaveLength(1);
+    expect(panel().findAll(".trade-stage-row")).toHaveLength(1);
     expect(panel().find(".ledger-history-table tbody").text()).toContain(
       "建仓",
     );
@@ -165,13 +174,130 @@ describe("重构工作台集成", () => {
     expect(panel().find(".planner").exists()).toBe(true);
     await button("交易记录").trigger("click");
     await flushPromises();
-    expect(panel().findAll(".ledger-history-table tbody tr")).toHaveLength(1);
-    await wrapper.find('[aria-label="关闭证券详情"]').trigger("click");
+    expect(panel().findAll(".trade-record-row")).toHaveLength(1);
+    await wrapper.find(".security-drawer-close").trigger("click");
     wrapper.findComponent(SecuritiesTable).vm.$emit("detail", "sh600519");
     await flushPromises();
     await button("交易记录").trigger("click");
     await flushPromises();
     expect(panel().text()).toContain("该证券暂无交易记录");
+  });
+  it("股票收益明细展示今日买入未T出部分的盈亏和收益率", async () => {
+    stored.entries.push(
+      {
+        id: "open-detail",
+        securityId: "sh510300",
+        kind: "opening",
+        quantity: "300",
+        available: "300",
+        price: "10",
+        time: "2026-08-27T01:00:00.000Z",
+        date: "2026-08-27",
+      },
+      {
+        id: "buy-detail",
+        securityId: "sh510300",
+        kind: "buy",
+        quantity: "200",
+        price: "9",
+        time: "2026-08-28T01:00:00.000Z",
+        date: "2026-08-28",
+        profile: { ...stored.profiles.etf },
+        feeSource: "actual",
+        fees: {
+          amount: "1800.00",
+          commission: "10.00",
+          transfer: "0.00",
+          stamp: "0.00",
+          total: "10.00",
+          cash: "1810.00",
+        },
+      },
+      {
+        id: "sell-detail",
+        securityId: "sh510300",
+        kind: "sell",
+        quantity: "100",
+        price: "10",
+        time: "2026-08-28T02:00:00.000Z",
+        date: "2026-08-28",
+        profile: { ...stored.profiles.etf },
+        feeSource: "actual",
+        fees: {
+          amount: "1000.00",
+          commission: "0.00",
+          transfer: "0.00",
+          stamp: "0.00",
+          total: "0.00",
+          cash: "1000.00",
+        },
+      },
+    );
+    marketQuotes.sh510300 = {
+      market: "sh",
+      code: "510300",
+      name: "测试ETF",
+      latest: "10",
+      bid: "10",
+      ask: "10",
+      quoteTime: "20260828150000",
+      fetchedAt: "2026-08-28T07:00:00Z",
+      kind: "etf",
+    };
+    marketCharts["sh510300:daily-raw"] = {
+      symbol: "sh510300",
+      mode: "daily-raw",
+      adjustment: "不复权",
+      fetchedAt: "2026-08-28T07:00:00Z",
+      sessions: [],
+      bars: [
+        {
+          date: "2026-08-27",
+          open: "10",
+          close: "10",
+          high: "10",
+          low: "10",
+          volume: "1000",
+        },
+      ],
+    };
+
+    await start();
+    expect(
+      wrapper.findComponent(SecuritiesTable).exists(),
+      wrapper.text(),
+    ).toBe(true);
+    wrapper.findComponent(SecuritiesTable).vm.$emit("detail", "sh510300");
+    await flushPromises();
+    await button("收益明细").trigger("click");
+    const panel = wrapper.find(".security-drawer");
+    const reviewRows = panel.findAll(".daily-review-row");
+    expect(reviewRows).toHaveLength(4);
+    expect(reviewRows[0].text()).toContain("日初");
+    expect(reviewRows[1].text()).toContain("估值");
+    expect(reviewRows[2].text()).toContain("现金流");
+    expect(reviewRows[2].text()).toContain("含手续费 10.00");
+    expect(reviewRows[3].text()).toContain("结果");
+    expect(reviewRows[3].text()).toContain("190.00");
+    expect(reviewRows[3].text()).toContain("4.99%");
+    const tRows = panel.findAll(".t-profit-row");
+    expect(tRows).toHaveLength(3);
+    expect(tRows[0].text()).toContain("今日");
+    expect(tRows[0].text()).toContain("95.00");
+    expect(tRows[0].text()).toContain("+10.50%");
+    expect(tRows[0].text()).toContain("100 股");
+    expect(tRows[1].text()).toContain("本轮");
+    expect(tRows[1].text()).toContain("+10.50%");
+    expect(tRows[2].text()).toContain("累计");
+    expect(tRows[2].text()).toContain("1 天");
+    const buyRow = panel.find(".today-buy-position-row");
+    expect(buyRow.exists()).toBe(true);
+    expect(panel.text()).toContain("今日买入未T出部分");
+    expect(buyRow.text()).toContain("当前盈亏");
+    expect(buyRow.text()).toContain("95.00");
+    expect(buyRow.text()).toContain("+10.50%");
+    expect(buyRow.text()).toContain("未T出数量");
+    expect(buyRow.text()).toContain("100 股");
   });
   it("顶部金额下方显示加权汇总收益率，缺报价时比例回退为空值", async () => {
     const items = [
@@ -233,8 +359,8 @@ describe("重构工作台集成", () => {
       };
     }
     await start();
-    const daily = () => wrapper.find('[aria-label="今日收益率"]');
-    const cycle = () => wrapper.find('[aria-label="当前持仓轮次收益率"]');
+    const daily = () => wrapper.find('[data-summary-rate="daily"]');
+    const cycle = () => wrapper.find('[data-summary-rate="cycle"]');
     expect(daily().text()).toBe("+7.50%");
     expect(
       daily().element.parentElement?.classList.contains("summary-values"),
@@ -256,8 +382,8 @@ describe("重构工作台集成", () => {
   });
   it("空账户顶部收益率显示—而不是0%", async () => {
     await start();
-    expect(wrapper.find('[aria-label="今日收益率"]').text()).toBe("—");
-    expect(wrapper.find('[aria-label="当前持仓轮次收益率"]').text()).toBe("—");
+    expect(wrapper.find('[data-summary-rate="daily"]').text()).toBe("—");
+    expect(wrapper.find('[data-summary-rate="cycle"]').text()).toBe("—");
   });
   it("顶部六项账户指标均以遮罩构成卡片展示真实明细", async () => {
     await start();
@@ -273,24 +399,20 @@ describe("重构工作台集成", () => {
       labels.length,
     );
     for (const label of labels)
-      expect(wrapper.find(`[aria-label="查看${label}说明"]`).exists()).toBe(
-        true,
-      );
-    const cash = wrapper.find('[aria-label="查看账面资金说明"]');
-    expect(cash.attributes("aria-expanded")).toBe("false");
+      expect(wrapper.find(`[title="查看${label}说明"]`).exists()).toBe(true);
+    const cash = wrapper.find('[title="查看账面资金说明"]');
+    expect(cash.classes()).not.toContain("open");
     await cash.trigger("click");
-    expect(cash.attributes("aria-expanded")).toBe("true");
+    expect(cash.classes()).toContain("open");
     const panel = document.querySelector(".summary-help-panel")!;
-    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.classList.contains("summary-help-panel")).toBe(true);
     expect(panel.textContent).toContain("账面资金构成");
     expect(panel.textContent).toContain("卖出净收入");
     expect(panel.textContent).toContain("买入总支出");
     expect(panel.textContent).toContain("账面资金0.00");
     expect(panel.textContent).toContain("不等于券商显示的可用或可转资金");
     expect(document.querySelector(".summary-help-overlay")).not.toBeNull();
-    (
-      document.querySelector('[aria-label="关闭指标说明"]') as HTMLElement
-    ).click();
+    (document.querySelector(".summary-help-close") as HTMLElement).click();
     await flushPromises();
     expect(document.querySelector(".summary-help-panel")).toBeNull();
   });
@@ -323,7 +445,7 @@ describe("重构工作台集成", () => {
       asset: "stock",
     });
     await flushPromises();
-    await wrapper.find('[aria-label="关闭对话框"]').trigger("click");
+    await wrapper.find(".dialog-close").trigger("click");
     await button("＋ 添加自选").trigger("click");
     expect(wrapper.find(".selected-security").exists()).toBe(false);
     expect(button("添加到自选").attributes("disabled")).toBeDefined();
@@ -360,22 +482,24 @@ describe("重构工作台集成", () => {
   it("普通自选只配置行情字段，持仓视图才提供收益字段", async () => {
     await start();
     await button("设置列").trigger("click");
-    expect(wrapper.find('[aria-label="走势列宽"]').exists()).toBe(false);
+    expect(wrapper.find('[data-column-width="chart"]').exists()).toBe(false);
     expect(wrapper.find(".auto-column-width").text()).toBe("自动");
     expect(wrapper.find(".column-order input").exists()).toBe(false);
-    expect(wrapper.find('[aria-label="主力净流入列宽"]').text()).toBe("104px");
-    expect(wrapper.find('[aria-label="持仓市值列宽"]').exists()).toBe(false);
-    expect(wrapper.find('[aria-label="本轮持仓盈亏列宽"]').exists()).toBe(
+    expect(wrapper.find('[data-column-width="flow"]').text()).toBe("104px");
+    expect(wrapper.find('[data-column-width="marketValue"]').exists()).toBe(
       false,
     );
-    await wrapper.find('[aria-label="关闭对话框"]').trigger("click");
+    expect(wrapper.find('[data-column-width="cyclePnl"]').exists()).toBe(false);
+    await wrapper.find(".dialog-close").trigger("click");
     await button("我的持仓 0").trigger("click");
     vi.mocked(saveAccount).mockClear();
     await button("设置列").trigger("click");
-    expect(wrapper.find('[aria-label="主力净流入列宽"]').text()).toBe("95px");
-    expect(wrapper.find('[aria-label="持仓市值列宽"]').text()).toBe("96px");
-    expect(wrapper.find('[aria-label="本轮持仓盈亏列宽"]').text()).toBe("93px");
-    expect(wrapper.find('[aria-label="拖动排序：走势"]').exists()).toBe(true);
+    expect(wrapper.find('[data-column-width="flow"]').text()).toBe("95px");
+    expect(wrapper.find('[data-column-width="marketValue"]').text()).toBe(
+      "96px",
+    );
+    expect(wrapper.find('[data-column-width="cyclePnl"]').text()).toBe("93px");
+    expect(wrapper.find('[title="拖动排序：走势"]').exists()).toBe(true);
     expect(saveAccount).not.toHaveBeenCalled();
   });
   it("盈利亏损自动组按累计贡献归类，并展示历史与当前持仓贡献字段", async () => {
@@ -420,6 +544,9 @@ describe("重构工作台集成", () => {
     expect(button("亏损 1")).toBeTruthy();
     await button("盈利 1").trigger("click");
     await flushPromises();
+    expect(
+      wrapper.find(".view-tabs").find("[title]").attributes("title"),
+    ).toContain("历史卖出盈亏");
     let table = wrapper.findComponent(SecuritiesTable);
     expect(table.props("variant")).toBe("contribution");
     expect(
@@ -513,10 +640,10 @@ describe("重构工作台集成", () => {
     expect(wrapper.findAll(".cash-summary button")).toHaveLength(0);
     await button("＋ 资金流水").trigger("click");
     await flushPromises();
-    expect(wrapper.findAll('[role="dialog"]')).toHaveLength(1);
+    expect(wrapper.findAll(".desk-overlay")).toHaveLength(1);
     const modal = wrapper.find(".entry-dialog .modal");
     expect(modal.findAll("label")).toHaveLength(4);
-    expect(modal.find('input[type="datetime-local"]').exists()).toBe(true);
+    expect(modal.find('[data-testid="cash-entry-time"]').exists()).toBe(true);
     expect(saveAccount).not.toHaveBeenCalled();
   });
   it("分组上下移动按钮有明确名称，表单采用统一分组布局", async () => {
@@ -527,13 +654,13 @@ describe("重构工作台集成", () => {
     });
     await start();
     await button("管理分组").trigger("click");
-    expect(wrapper.find('[aria-label="上移分组关注"]').exists()).toBe(true);
-    expect(wrapper.find('[aria-label="下移分组关注"]').exists()).toBe(true);
+    expect(wrapper.find(".group-move-up").exists()).toBe(true);
+    expect(wrapper.find(".group-move-down").exists()).toBe(true);
     expect(wrapper.find(".group-form label input").exists()).toBe(true);
   });
   it("右键全选仅包含当前筛选结果", async () => {
     await start();
-    await wrapper.find('[aria-label="品种筛选"]').setValue("etf");
+    await wrapper.find(".asset-filter").setValue("etf");
     const table = wrapper.findComponent(SecuritiesTable);
     table.vm.$emit("context", { id: stored.securities[0].id, x: 20, y: 200 });
     await flushPromises();
@@ -560,7 +687,7 @@ describe("重构工作台集成", () => {
     table.vm.$emit("check", [stored.securities[0].id]);
     table.vm.$emit("context", { id, x: 800, y: 600 });
     await flushPromises();
-    expect(wrapper.find('[role="menu"]').text()).toContain(
+    expect(wrapper.find(".row-context-menu").text()).toContain(
       stored.securities[1].name,
     );
     expect(wrapper.find(".batch-bar").exists()).toBe(false);
@@ -618,7 +745,7 @@ describe("重构工作台集成", () => {
     await flushPromises();
     await button("做T测算").trigger("click");
     await flushPromises();
-    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    expect(wrapper.find(".row-context-menu").exists()).toBe(false);
     const planner = wrapper
       .find(".security-drawer")
       .findComponent(LedgerWorkbench);
@@ -646,8 +773,8 @@ describe("重构工作台集成", () => {
     };
     await open();
     expect(button("保存分组").attributes("disabled")).toBeDefined();
-    await wrapper.find('input[aria-label="原有"]').setValue(false);
-    await wrapper.find('input[aria-label="新增"]').setValue(true);
+    await groupCheckbox("原有").setValue(false);
+    await groupCheckbox("新增").setValue(true);
     await wrapper.find(".desk-dialog form").trigger("submit");
     await flushPromises();
     expect(stored.workspace!.groups.map((g) => g.members)).toEqual([
@@ -656,8 +783,8 @@ describe("重构工作台集成", () => {
       [ids[1], ids[0]],
     ]);
     await open();
-    await wrapper.find('input[aria-label="保留"]').setValue(false);
-    await wrapper.find('input[aria-label="新增"]').setValue(false);
+    await groupCheckbox("保留").setValue(false);
+    await groupCheckbox("新增").setValue(false);
     expect(button("保存分组").attributes("disabled")).toBeUndefined();
     await wrapper.find(".desk-dialog form").trigger("submit");
     await flushPromises();
@@ -681,12 +808,12 @@ describe("重构工作台集成", () => {
     table.vm.$emit("check", ids);
     table.vm.$emit("context", { id: ids[0], x: 20, y: 200 });
     await flushPromises();
-    expect(wrapper.find('[role="menu"]').text()).toContain("已选 2 只证券");
+    expect(wrapper.find(".row-context-menu").text()).toContain("已选 2 只证券");
     expect(button("查看详情").attributes("disabled")).toBeDefined();
     await button("加入分组…").trigger("click");
     expect(button("加入分组").attributes("disabled")).toBeDefined();
-    await wrapper.find('input[aria-label="关注"]').setValue(true);
-    await wrapper.find('input[aria-label="长期"]').setValue(true);
+    await groupCheckbox("关注").setValue(true);
+    await groupCheckbox("长期").setValue(true);
     expect(wrapper.find(".group-picker legend").text()).toContain("已选 2 个");
     await wrapper.find(".desk-dialog form").trigger("submit");
     await flushPromises();
@@ -719,8 +846,8 @@ describe("重构工作台集成", () => {
         .map((input) => input.attributes("value"));
     await open([ids[0]]);
     expect(checkedGroups()).toEqual(["g-common", "g-first"]);
-    await wrapper.find('input[aria-label="共同"]').setValue(false);
-    await wrapper.find('input[aria-label="未加入"]').setValue(true);
+    await groupCheckbox("共同").setValue(false);
+    await groupCheckbox("未加入").setValue(true);
     await button("取消").trigger("click");
     await open([ids[0]]);
     expect(checkedGroups()).toEqual(["g-common", "g-first"]);
@@ -749,16 +876,15 @@ describe("重构工作台集成", () => {
       await button("加入分组…").trigger("click");
     };
     await open();
-    await wrapper.find('input[aria-label="关注"]').setValue(true);
+    await groupCheckbox("关注").setValue(true);
     await button("取消").trigger("click");
     expect(saveAccount).not.toHaveBeenCalled();
     await open();
-    expect(
-      (wrapper.find('input[aria-label="关注"]').element as HTMLInputElement)
-        .checked,
-    ).toBe(false);
-    await wrapper.find('input[aria-label="关注"]').setValue(true);
-    await wrapper.find('input[aria-label="关注"]').setValue(false);
+    expect((groupCheckbox("关注").element as HTMLInputElement).checked).toBe(
+      false,
+    );
+    await groupCheckbox("关注").setValue(true);
+    await groupCheckbox("关注").setValue(false);
     await wrapper.find(".desk-dialog form").trigger("submit");
     expect(saveAccount).not.toHaveBeenCalled();
     expect(button("保存分组").attributes("disabled")).toBeDefined();
@@ -771,15 +897,14 @@ describe("重构工作台集成", () => {
       .vm.$emit("context", { id: stored.securities[0].id, x: 20, y: 200 });
     await flushPromises();
     await button("加入分组…").trigger("click");
-    await wrapper.find('input[aria-label="关注"]').setValue(true);
+    await groupCheckbox("关注").setValue(true);
     vi.mocked(saveAccount).mockRejectedValueOnce(new Error("磁盘不可用"));
     await wrapper.find(".desk-dialog form").trigger("submit");
     await flushPromises();
     expect(stored.workspace!.groups[0].members).toEqual([]);
-    expect(
-      (wrapper.find('input[aria-label="关注"]').element as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect((groupCheckbox("关注").element as HTMLInputElement).checked).toBe(
+      true,
+    );
   });
   it("分组右键移出只影响该分组，重排保留其他分组顺序", async () => {
     const ids = stored.securities.map((s) => s.id);
@@ -811,16 +936,14 @@ describe("重构工作台集成", () => {
       id = stored.securities[1].id;
     table.vm.$emit("context", { id, x: 20, y: 200 });
     await flushPromises();
-    await wrapper
-      .find('[aria-label="搜索自选"]')
-      .setValue(stored.securities[0].name);
-    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    await wrapper.find(".security-filter").setValue(stored.securities[0].name);
+    expect(wrapper.find(".row-context-menu").exists()).toBe(false);
     expect(table.props("checked")).toEqual([]);
-    await wrapper.find('[aria-label="搜索自选"]').setValue("");
+    await wrapper.find(".security-filter").setValue("");
     table.vm.$emit("context", { id, x: 20, y: 200 });
     await flushPromises();
     const sell = wrapper
-      .findAll('[role="menuitem"]')
+      .findAll(".row-menu-item")
       .find((b) => b.text() === "交易")!;
     await sell.trigger("click");
     await flushPromises();
@@ -828,7 +951,9 @@ describe("重构工作台集成", () => {
       stored.securities[1].name,
     );
     expect(wrapper.find(".entry-dialog h2").text()).toContain("录入成交");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("成交价");
+    expect(document.activeElement?.getAttribute("data-testid")).toBe(
+      "trade-price",
+    );
     expect(wrapper.findAll(".submit-order").map((b) => b.text())).toEqual([
       "买入",
       "卖出",
@@ -843,18 +968,16 @@ describe("重构工作台集成", () => {
     };
     button("交易").element.focus();
     await open();
-    expect(wrapper.find(".security-drawer").attributes("aria-modal")).toBe(
-      "true",
-    );
+    expect(wrapper.find(".security-drawer").exists()).toBe(true);
     expect(wrapper.find(".security-drawer h2").text()).toBe(
       stored.securities[0].name,
     );
     expect(wrapper.find(".desk-market-body").classes()).not.toContain(
       "with-drawer",
     );
-    expect(document.activeElement?.getAttribute("aria-label")).toBe(
-      "关闭证券详情",
-    );
+    expect(
+      document.activeElement?.classList.contains("security-drawer-close"),
+    ).toBe(true);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await flushPromises();
     expect(wrapper.find(".security-drawer").exists()).toBe(false);
@@ -863,7 +986,7 @@ describe("重构工作台集成", () => {
     await wrapper.find(".security-drawer-overlay").trigger("click");
     expect(wrapper.find(".security-drawer").exists()).toBe(false);
     await open();
-    await wrapper.find('[aria-label="关闭证券详情"]').trigger("click");
+    await wrapper.find(".security-drawer-close").trigger("click");
     expect(wrapper.find(".security-drawer").exists()).toBe(false);
   });
   it("从详情打开成交弹窗时Esc只关闭顶层，保留原证券与抽屉", async () => {
@@ -892,7 +1015,7 @@ describe("重构工作台集成", () => {
     document.elementFromPoint = () => row.element;
     try {
       await wrapper
-        .find('[aria-label="拖动排序：走势"]')
+        .find('[title="拖动排序：走势"]')
         .trigger("pointerdown", { button: 0 });
       window.dispatchEvent(
         new MouseEvent("pointermove", { clientX: 10, clientY: 100 }),
@@ -907,7 +1030,7 @@ describe("重构工作台集成", () => {
       ).toEqual(["change", "fiveDay", "chart", "peRatio", "pbRatio"]);
       expect(saveAccount).not.toHaveBeenCalled();
       await wrapper
-        .find('[aria-label="拖动排序：走势"]')
+        .find('[title="拖动排序：走势"]')
         .trigger("keydown", { key: "ArrowUp" });
       await button("保存列设置").trigger("click");
       await flushPromises();

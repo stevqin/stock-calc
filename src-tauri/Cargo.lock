@@ -3721,13 +3721,14 @@ dependencies = [
 
 [[package]]
 name = "t-calculator"
-version = "0.6.0"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "encoding_rs",
  "keyring",
  "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "reqwest 0.12.28",
  "rfd",
  "rusqlite",

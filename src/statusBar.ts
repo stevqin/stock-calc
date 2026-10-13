@@ -1,14 +1,27 @@
 import Decimal from "decimal.js";
+import type { Entry } from "./sim/model";
 
 export interface HoldingFrame {
   name: string;
   change: string | null;
+  dailyPercent: string | null;
   profit: string | null;
   stale: boolean;
 }
 export interface TotalFrame {
   percent: string | null;
   profit: string | null;
+  stale: boolean;
+}
+export type StatusTone = "up" | "down" | "flat";
+export interface StatusFrame {
+  label: string;
+  change: string;
+  dailyPercent: string;
+  profit: string;
+  changeTone: StatusTone;
+  dailyPercentTone: StatusTone;
+  profitTone: StatusTone;
   stale: boolean;
 }
 export function signed(value: string | null, money = false): string {
@@ -41,20 +54,42 @@ export function compactMoney(value: string | null): string {
 export function statusBarFrames(
   holdings: HoldingFrame[],
   total: TotalFrame,
-): string[] {
+): StatusFrame[] {
   return [
-    ...holdings.map(
-      (row) =>
-        `${row.name} ${signed(row.change)}｜${compactMoney(row.profit)}${row.stale ? " *" : ""}`,
-    ),
-    `合计${signed(total.percent)}｜${compactMoney(total.profit)}${total.stale ? " *" : ""}`,
+    ...holdings.map((row) => ({
+      label: `${row.name} `,
+      change: signed(row.change),
+      dailyPercent: signed(row.dailyPercent),
+      profit: compactMoney(row.profit),
+      changeTone: statusTone(row.change),
+      dailyPercentTone: statusTone(row.dailyPercent),
+      profitTone: statusTone(row.profit),
+      stale: row.stale,
+    })),
+    {
+      label: "合计 ",
+      change: "",
+      dailyPercent: signed(total.percent),
+      profit: compactMoney(total.profit),
+      changeTone: "flat",
+      dailyPercentTone: statusTone(total.percent),
+      profitTone: statusTone(total.profit),
+      stale: total.stale,
+    },
   ];
 }
 
+export type StatusTrade = Pick<
+  Entry,
+  "id" | "securityId" | "kind" | "quantity" | "price" | "time" | "date"
+>;
 export interface StatusSnapshot {
-  frames: string[];
+  frames: StatusFrame[];
+  trades: StatusTrade[];
   holdings: (HoldingFrame & {
     id: string;
+    market: "sh" | "sz";
+    code: string;
     shortName: string;
     holdingProfit: string | null;
     price: string | null;
@@ -65,7 +100,7 @@ export interface StatusSnapshot {
   date: string;
   updatedAt: number;
 }
-export function statusTone(value: string | null): "up" | "down" | "flat" {
+export function statusTone(value: string | null): StatusTone {
   if (value === null) return "flat";
   const amount = new Decimal(value).toDecimalPlaces(2);
   return !amount.isFinite() || amount.isZero()
@@ -84,39 +119,49 @@ const knownNames: Record<string, string> = {
   农业银行: "农行",
   中国银行: "中行",
 };
+function boundedShortName(value: string, fallback: string, id: string): string {
+  const cleaned = value.trim().replace(/[\r\n\t]/g, "");
+  let chars = Array.from(cleaned);
+  if (chars.length < 2) chars = Array.from(fallback.trim());
+  if (chars.length < 2) chars.push(...Array.from(id));
+  return chars.length > 8 ? `${chars.slice(0, 5).join("")}…` : chars.join("");
+}
 export function shortNames(
   rows: { id: string; name: string }[],
   overrides: Record<string, string> = {},
 ): Record<string, string> {
   const names = rows.map((row) => {
-    const override = overrides[row.id]
-      ?.trim()
-      .replace(/[\r\n\t]/g, "")
-      .slice(0, 12);
-    if (override) return override;
+    const override = overrides[row.id];
+    if (override?.trim()) return boundedShortName(override, row.name, row.id);
     const name = row.name.trim();
-    if (knownNames[name]) return knownNames[name];
+    if (knownNames[name])
+      return boundedShortName(knownNames[name], name, row.id);
     // ETF providers occur after ETF; keep the theme and distinguishing index number.
     const theme = name
       .split(/ETF/i)[0]
       .replace(/(?:科技|药业|石油|股份|集团|基金)$/, "");
-    if (/\d/.test(theme)) return theme;
-    return Array.from(theme || name)
-      .slice(0, 2)
-      .join("");
+    return boundedShortName(theme || name, name, row.id);
   });
   const duplicates = new Set(
     names.filter((name, index) => names.indexOf(name) !== index),
   );
   const resolved = names.map((name, index) =>
-    duplicates.has(name) ? rows[index].name : name,
+    duplicates.has(name)
+      ? boundedShortName(rows[index].name, rows[index].name, rows[index].id)
+      : name,
+  );
+  const unresolved = new Set(
+    resolved.filter((name, index) => resolved.indexOf(name) !== index),
   );
   return Object.fromEntries(
-    rows.map((row, index) => [
-      row.id,
-      resolved.filter((name) => name === resolved[index]).length > 1
-        ? `${resolved[index]}·${row.id}`
-        : resolved[index],
-    ]),
+    rows.map((row, index) => {
+      if (!unresolved.has(resolved[index])) return [row.id, resolved[index]];
+      const prefix = Array.from(resolved[index]).slice(0, 3).join("");
+      const suffix = Array.from(row.id).slice(-2).join("");
+      return [
+        row.id,
+        boundedShortName(`${prefix}·${suffix}`, row.name, row.id),
+      ];
+    }),
   );
 }

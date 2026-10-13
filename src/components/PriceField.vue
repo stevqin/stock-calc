@@ -24,23 +24,18 @@ function step(delta: number) {
 <template>
   <label class="field-label" :for="id">{{ label }} <span>元</span></label>
   <div class="price-field">
-    <button type="button" :aria-label="`${label}减少一档`" @click="step(-1)">
-      −
-    </button>
+    <button type="button" class="price-decrease" @click="step(-1)">−</button>
     <input
       :id="id"
       :value="modelValue"
       inputmode="decimal"
       autocomplete="off"
-      :aria-label="label"
       @input="
         emit('update:modelValue', ($event.target as HTMLInputElement).value)
       "
       @keydown.up.prevent="step(1)"
       @keydown.down.prevent="step(-1)"
     />
-    <button type="button" :aria-label="`${label}增加一档`" @click="step(1)">
-      ＋
-    </button>
+    <button type="button" class="price-increase" @click="step(1)">＋</button>
   </div>
 </template>

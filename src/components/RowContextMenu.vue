@@ -87,8 +87,6 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="menu"
-    role="menu"
-    :aria-label="title + '操作'"
     class="row-context-menu"
     :style="{ left: left + 'px', top: top + 'px' }"
     @keydown="keys"
@@ -98,7 +96,7 @@ onBeforeUnmount(() => {
     <button
       v-for="item in items"
       :key="item.id"
-      role="menuitem"
+      class="row-menu-item"
       :disabled="item.disabled"
       :class="{ 'menu-separator': item.separator }"
       @click="select(item.id)"

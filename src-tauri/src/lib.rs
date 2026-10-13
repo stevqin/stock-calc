@@ -1,6 +1,8 @@
 mod ai;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 mod charts;
 mod fund_flows;
 mod history_store;
@@ -279,9 +281,16 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             #[cfg(target_os = "macos")]
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            {
+                if let tauri::WindowEvent::Focused(true) = event {
+                    if window.label() == "main" {
+                        let _ = window.emit("main-window-activated", ());
+                    }
+                }
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (window, event);
@@ -290,6 +299,7 @@ pub fn run() {
             status_bar::update_status_bar,
             status_bar::get_status_portfolio,
             status_bar::get_status_active_index,
+            status_bar::set_status_active_index,
             status_bar::hide_status_panel,
             status_bar::open_status_main,
             status_bar::get_status_paused,

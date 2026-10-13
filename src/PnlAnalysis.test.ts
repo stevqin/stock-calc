@@ -130,14 +130,17 @@ describe("盈亏分析日历", () => {
     );
     wrapper = mount(PnlAnalysis, { props: { account, today: "2026-01-15" } });
     await flushPromises();
-    expect(wrapper.get('[aria-label="区间盈亏率"]').text()).toBe("+29.87%");
+    expect(wrapper.text()).toContain("区间卖出盈亏");
+    expect(wrapper.get(".pnl-contribution").text()).toContain("区间收益率");
+    expect(wrapper.get(".range-return").text()).toBe("+29.87%");
     expect(wrapper.findAll(".pnl-month-return")[0].text()).toBe("+29.87%");
     expect(wrapper.get('[data-date="2026-01-13"] .pnl-day-return').text()).toBe(
       "+10.00%",
     );
     await wrapper.get('[data-date="2026-01-13"]').trigger("click");
-    expect(wrapper.get('[aria-label="当日盈亏率"]').text()).toBe("+10.00%");
-    await wrapper.get('[aria-label="关闭收益明细"]').trigger("click");
+    expect(wrapper.get(".pnl-day-detail").text()).toContain("当日卖出盈亏");
+    expect(wrapper.get(".day-return").text()).toBe("+10.00%");
+    await wrapper.get(".pnl-day-close").trigger("click");
     await button("年").trigger("click");
     expect(
       wrapper.get('[data-period="2026-01"] .pnl-period-return').text(),
@@ -147,6 +150,60 @@ describe("盈亏分析日历", () => {
       "+29.87%",
     );
   });
+  it("贡献列表可等宽放大，并按盈亏和收益率切换排序", async () => {
+    const account = stockAccount();
+    account.entries.push({
+      ...account.entries[0],
+      id: "buy-second",
+      securityId: "sz159915",
+      price: "20",
+      fees: {
+        amount: "2000",
+        commission: "1",
+        stamp: "0",
+        transfer: "0",
+        total: "1",
+        cash: "2001",
+      },
+    });
+    vi.mocked(loadAnalysisHistory).mockImplementation(async (security) => {
+      if (security.id === "sh510300") return stockBars(security.id);
+      const chart = stockBars(security.id);
+      chart.bars = chart.bars.map((bar, index) => ({
+        ...bar,
+        open: String(20 - index),
+        high: String(20 - index),
+        low: String(20 - index),
+        close: String(20 - index),
+      }));
+      return chart;
+    });
+    wrapper = mount(PnlAnalysis, {
+      props: { account, today: "2026-01-15" },
+    });
+    await flushPromises();
+
+    const compactRows = () =>
+      wrapper.findAll(".pnl-contribution > .pnl-contribution-scroll tbody tr");
+    expect(compactRows()[0].text()).toContain("沪深300ETF");
+    expect(compactRows()[0].text()).toContain("+29.87%");
+
+    await wrapper.get('[data-contribution-sort="profit"]').trigger("click");
+    expect(compactRows()[0].text()).toContain("创业板ETF");
+    await wrapper.get('[data-contribution-sort="returnRate"]').trigger("click");
+    expect(compactRows()[0].text()).toContain("沪深300ETF");
+
+    await button("放大查看").trigger("click");
+    await flushPromises();
+    expect(
+      wrapper.get("dialog.pnl-contribution-dialog").attributes(),
+    ).toHaveProperty("open");
+    expect(wrapper.get(".pnl-contribution-dialog tbody").text()).toContain(
+      "创业板ETF",
+    );
+    await wrapper.get(".pnl-contribution-dialog-close").trigger("click");
+    expect(wrapper.find("dialog.pnl-contribution-dialog").exists()).toBe(false);
+  });
   it.each([
     ["2025-11", "2025-11-03"],
     ["2025-06", "2025-06-02"],
@@ -154,7 +211,9 @@ describe("盈亏分析日历", () => {
     "%s 月初在周末时从周一开始，月历只展示五个工作日列",
     async (month, first) => {
       await start();
-      await wrapper.get('[aria-label="选择月份"]').setValue(month);
+      const monthInput = wrapper.get('[data-testid="analysis-month"] input');
+      await monthInput.setValue(month);
+      await monthInput.trigger("blur");
       const calendar = wrapper.findAll(".pnl-month")[0];
       expect(
         calendar.findAll(".pnl-weekdays span").map((day) => day.text()),
@@ -238,7 +297,9 @@ describe("盈亏分析日历", () => {
       "2025年3月",
       "2025年2月",
     ]);
-    await wrapper.get('[aria-label="选择月份"]').setValue("2025-12");
+    const monthInput = wrapper.get('[data-testid="analysis-month"] input');
+    await monthInput.setValue("2025-12");
+    await monthInput.trigger("blur");
     expect(wrapper.findAll(".pnl-month h3").map((x) => x.text())).toEqual([
       "2025年12月",
       "2025年11月",
@@ -264,7 +325,7 @@ describe("盈亏分析日历", () => {
     ).toEqual(["2025", "2026"]);
     await button("年").trigger("click");
     expect(wrapper.findAll(".pnl-period-cell")).toHaveLength(12);
-    expect(wrapper.get('[aria-label="选择年份"]').element).toHaveProperty(
+    expect(wrapper.get(".pnl-year-select").element).toHaveProperty(
       "value",
       "2026",
     );
@@ -277,20 +338,22 @@ describe("盈亏分析日历", () => {
     expect(wrapper.get(".pnl-day-detail").text()).toContain("2025-11-03");
     expect(wrapper.get(".pnl-day-detail").text()).toContain("12.30");
     await flushPromises();
-    expect(wrapper.get("dialog[open]").attributes("aria-labelledby")).toBe(
-      "pnl-day-title",
+    expect(wrapper.get("dialog[open] #pnl-day-title").text()).toContain(
+      "收益明细",
     );
     await wrapper.get("dialog").trigger("cancel");
     expect(wrapper.find("dialog").exists()).toBe(false);
     await wrapper.get('[data-date="2025-11-03"]').trigger("click");
-    await wrapper.get('[aria-label="关闭收益明细"]').trigger("click");
+    await wrapper.get(".pnl-day-close").trigger("click");
     expect(wrapper.find("dialog").exists()).toBe(false);
     await button("最近半年").trigger("click");
     expect(JSON.stringify(fixture)).toBe(original);
   });
   it("闰年二月包含29日，保持十二个独立月历", async () => {
     await start();
-    await wrapper.get('[aria-label="选择月份"]').setValue("2024-02");
+    const monthInput = wrapper.get('[data-testid="analysis-month"] input');
+    await monthInput.setValue("2024-02");
+    await monthInput.trigger("blur");
     expect(wrapper.findAll(".pnl-month")).toHaveLength(12);
     expect(wrapper.find('[data-date="2024-02-29"]').exists()).toBe(true);
     expect(wrapper.find('[data-date="2024-02-30"]').exists()).toBe(false);

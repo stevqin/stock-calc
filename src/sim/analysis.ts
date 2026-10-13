@@ -12,6 +12,10 @@ export interface AnalysisContribution {
   profit: string | null;
   realized: string;
   fees: string;
+  returnRate: string | null;
+  /** Unrounded daily or compounded growth factor. */
+  returnFactor: string | null;
+  rateReason: string;
 }
 export interface AnalysisDay {
   returnBase: string | null;
@@ -308,6 +312,29 @@ export function analyzeAccount(
           : D(cents(state.quantity.mul(endPrice!)));
         profit = cents(after.minus(before).plus(flow));
       }
+      const contributionBase =
+        profit === null || (quantityStart.gt(0) && !previousPrice)
+          ? null
+          : (quantityStart.isZero()
+              ? D(0)
+              : D(cents(quantityStart.mul(previousPrice!)))
+            ).plus(Decimal.max(0, flow.neg()));
+      const contributionReason =
+        profit === null
+          ? "缺少估值基准，无法计算收益率"
+          : contributionBase?.gt(0)
+            ? ""
+            : D(profit).isZero()
+              ? ""
+              : "无有效证券资金基数";
+      const contributionFactor =
+        profit === null
+          ? null
+          : contributionBase?.gt(0)
+            ? D(1).plus(D(profit).div(contributionBase)).toString()
+            : D(profit).isZero()
+              ? "1"
+              : null;
       netBuy = netBuy.minus(flow);
       if (quantityStart.gt(0) && previousPrice)
         startValue = startValue.plus(cents(quantityStart.mul(previousPrice)));
@@ -316,6 +343,12 @@ export function analyzeAccount(
         profit,
         realized: cents(D(cents(state.realized)).minus(realizedStart)),
         fees: cents(fees),
+        returnRate:
+          contributionFactor === null
+            ? null
+            : D(contributionFactor).minus(1).mul(100).toFixed(2),
+        returnFactor: contributionFactor,
+        rateReason: contributionReason,
       });
       if (state.quantity.isZero()) {
         const clock = options.now;
@@ -426,6 +459,9 @@ export function summarizeAnalysis(
         profit: "0.00",
         realized: "0.00",
         fees: "0.00",
+        returnRate: "0.00",
+        returnFactor: "1",
+        rateReason: "",
       };
       p.profit =
         p.profit === null || c.profit === null
@@ -433,6 +469,16 @@ export function summarizeAnalysis(
           : cents(D(p.profit).plus(c.profit));
       p.realized = cents(D(p.realized).plus(c.realized));
       p.fees = cents(D(p.fees).plus(c.fees));
+      p.returnFactor =
+        p.returnFactor === null || c.returnFactor === null
+          ? null
+          : D(p.returnFactor).mul(c.returnFactor).toString();
+      p.returnRate =
+        p.returnFactor === null
+          ? null
+          : D(p.returnFactor).minus(1).mul(100).toFixed(2);
+      if (c.returnFactor === null)
+        p.rateReason = c.rateReason || "区间存在收益率数据缺口";
       contributions.set(c.securityId, p);
     }
   }

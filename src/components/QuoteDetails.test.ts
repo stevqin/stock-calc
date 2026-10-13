@@ -77,3 +77,24 @@ it("五日分时铺满宽度且不显示盘口或筹码", async () => {
   expect(wrapper.find(".quote-book").exists()).toBe(true);
   wrapper.unmount();
 });
+
+it("分时标签栏横跨整行，盘口与图表从标签栏下方同一高度开始", () => {
+  const wrapper = mount(QuoteDetails, {
+    props: { mode: "intraday" },
+    slots: {
+      "chart-tabs": '<div class="tabs-probe">tabs</div>',
+      chart: '<div class="chart-probe">chart</div>',
+    },
+  });
+  const market = wrapper.get(".quote-market-view");
+  expect(market.element.children[0]).toBe(
+    wrapper.get(".quote-chart-tabs").element,
+  );
+  const content = wrapper.get(".quote-market-content");
+  expect(market.element.children[1]).toBe(content.element);
+  expect(content.element.children[0]).toBe(
+    wrapper.get(".quote-chart-main").element,
+  );
+  expect(content.element.children[1]).toBe(wrapper.get(".quote-book").element);
+  wrapper.unmount();
+});

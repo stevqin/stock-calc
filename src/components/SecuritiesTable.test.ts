@@ -271,7 +271,7 @@ describe("双行证券指标", () => {
       positions: {},
       daily: { [id]: { profit: "0.00", reason: "" } },
     });
-    expect(wrapper.find('[aria-label="持仓成本单价"]').exists()).toBe(true);
+    expect(wrapper.find(".sort-cost").exists()).toBe(true);
     expect(wrapper.find(".cost-secondary").text()).toBe("—");
     expect(wrapper.find('[data-metric="dailyPnl"] span').text()).toBe("—");
     expect(wrapper.find('[data-metric="dailyPnl"] small').text()).toBe("—");
@@ -314,7 +314,6 @@ describe("双行证券指标", () => {
       wrapper.find('col[data-column="dailyPnl"]').attributes("style"),
     ).toContain("85px");
     expect(wrapper.find(".column-resizer").exists()).toBe(false);
-    expect(wrapper.find('[role="separator"]').exists()).toBe(false);
     expect(
       wrapper.find('col[data-column="marketValue"]').attributes("style"),
     ).toContain("96px");
@@ -405,9 +404,11 @@ describe("双行证券指标", () => {
   it("收益贡献视图隐藏持仓成本，并显示累计、历史、当前和组内占比", async () => {
     await start();
     const id = manualAccount().securities[0].id;
+    const view = defaultView("profit");
+    view.columns = [...view.columns, "realizedContribution"];
     await wrapper.setProps({
       variant: "contribution",
-      view: defaultView("profit"),
+      view,
       contributions: {
         [id]: {
           total: "120.50",
@@ -417,7 +418,8 @@ describe("双行证券指标", () => {
         },
       },
     });
-    expect(wrapper.find('[aria-label="持仓成本单价"]').exists()).toBe(false);
+    expect(wrapper.find(".sort-cost").exists()).toBe(false);
+    expect(wrapper.find("thead").text()).toContain("历史卖出盈亏");
     expect(wrapper.find(".cost-secondary").exists()).toBe(false);
     expect(wrapper.findAll("col")[1].attributes("style")).toContain("90px");
     expect(
@@ -429,6 +431,9 @@ describe("双行证券指标", () => {
     const breakdown = wrapper.find('[data-metric="contributionBreakdown"]');
     expect(breakdown.text()).toContain("历+80.25");
     expect(breakdown.text()).toContain("持+40.25");
+    expect(
+      wrapper.find('[data-metric="realizedContribution"]').attributes("title"),
+    ).toContain("包含部分卖出和已经清仓的交易");
   });
   it("所有百分比随数字显示符号，非收益比例不加正号，零涨幅为灰", async () => {
     await start();
@@ -470,11 +475,11 @@ describe("双行证券指标", () => {
     expect(wrapper.find('col[data-column="dilutedCost"]').exists()).toBe(false);
     expect(wrapper.find('[data-metric="floatCap"]').text()).toBe("12.34");
     expect(wrapper.find('[data-metric="volume"]').text()).toBe("1.23");
-    expect(wrapper.find('[aria-label="成交量"]').text()).toContain("万手");
-    expect(wrapper.find('[aria-label="持仓市值"]').text()).toContain(
+    expect(wrapper.find('th[data-column="volume"]').text()).toContain("万手");
+    expect(wrapper.find('th[data-column="marketValue"]').text()).toContain(
       "持仓（可卖）",
     );
-    await wrapper.find('[aria-label="持仓成本单价"]').trigger("click");
+    await wrapper.find(".sort-cost").trigger("click");
     expect(wrapper.emitted("config")?.[0]?.[0]).toMatchObject({
       sort: "dilutedCost",
     });

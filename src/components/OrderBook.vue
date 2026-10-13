@@ -93,7 +93,7 @@ function depth(value: string) {
 }
 </script>
 <template>
-  <aside class="quote-book" aria-label="五档盘口">
+  <aside class="quote-book">
     <h4>五档盘口</h4>
     <dl v-if="!compact" class="book-summary">
       <div>
@@ -107,17 +107,17 @@ function depth(value: string) {
     </dl>
     <div class="book-columns">
       <span>档位</span><span>价格</span
-      ><span class="book-unit" aria-label="盘口单位"
+      ><span class="book-unit"
         ><button
           type="button"
-          :aria-pressed="unit === 'lots'"
+          :class="{ active: unit === 'lots' }"
           @click="unit = 'lots'"
         >
           手</button
         ><span>/</span
         ><button
           type="button"
-          :aria-pressed="unit === 'amount'"
+          :class="{ active: unit === 'amount' }"
           title="委托额：每档价格 × 手数 × 100，单位元"
           @click="unit = 'amount'"
         >
@@ -145,10 +145,7 @@ function depth(value: string) {
         <span>{{ row.label }}</span
         ><b :class="priceTone(row.price)">{{ price(row.price) }}</b>
         <span class="book-volume"
-          ><i
-            aria-hidden="true"
-            :style="{ width: depth(displayValue(row)) }"
-          ></i
+          ><i :style="{ width: depth(displayValue(row)) }"></i
           ><span>{{ displayText(row) }}</span></span
         >
       </div>
@@ -295,7 +292,7 @@ dd {
   color: #8390a1;
   cursor: pointer;
 }
-.book-unit button[aria-pressed="true"] {
+.book-unit button.active {
   color: #3268cf;
   font-weight: 600;
 }

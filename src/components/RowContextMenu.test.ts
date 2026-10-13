@@ -38,7 +38,7 @@ describe("证券右键菜单", () => {
   });
   it("菜单选项执行后关闭，点击外部或滚动列表关闭", async () => {
     await start();
-    await wrapper.find("button").trigger("click");
+    await wrapper.find(".row-menu-item").trigger("click");
     expect(wrapper.emitted("action")).toEqual([["a"]]);
     expect(wrapper.emitted("close")).toHaveLength(1);
     document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));

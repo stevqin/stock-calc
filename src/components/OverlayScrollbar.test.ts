@@ -54,8 +54,9 @@ it("默认隐藏、滚动显示、停止900ms隐藏，DOM不包裹或挤占内�
   expect(bar()).toBeNull();
   await scroll(100);
   expect(bar()?.classList.contains("is-visible")).toBe(true);
-  expect(bar()?.getAttribute("aria-valuemax")).toBe("800");
-  expect(bar()?.getAttribute("aria-valuenow")).toBe("100");
+  expect(bar()?.dataset.testid).toBe("overlay-scroll-thumb");
+  expect(bar()?.tabIndex).toBe(0);
+  expect(bar()?.style.top).not.toBe("");
   expect(area.parentElement).toBe(document.body);
   expect(area.style.width).toBe("");
   await vi.advanceTimersByTimeAsync(901);
@@ -139,8 +140,8 @@ it("既有元素ID不被替换，滚动回顶部可正确归零", async () => {
   area.id = "existing-panel";
   await scroll(400);
   await scroll(0);
-  expect(bar()?.getAttribute("aria-controls")).toBe("existing-panel");
-  expect(bar()?.getAttribute("aria-valuenow")).toBe("0");
+  expect(area.id).toBe("existing-panel");
+  expect(bar()?.style.top).toBe("12px");
   wrapper.unmount();
   expect(area.id).toBe("existing-panel");
 });

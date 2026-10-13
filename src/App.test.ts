@@ -24,7 +24,7 @@ describe("计算器界面", () => {
     expect(wrapper.find(".net-value").text()).toContain("+0.47");
     await wrapper.get("#sell-price").setValue("10.10");
     expect(wrapper.find(".net-value").text()).toContain("-0.53");
-    await wrapper.get('button[aria-label="卖出价增加一档"]').trigger("click");
+    await wrapper.get("#sell-price + button").trigger("click");
     expect(wrapper.find(".net-value").text()).toContain("+0.47");
     await wrapper.get("#target").setValue("50");
     await wrapper.get(".target-answer button").trigger("click");
@@ -51,7 +51,7 @@ describe("计算器界面", () => {
       kind: "stock",
     });
     wrapper = mount(App);
-    await wrapper.get('input[aria-label="证券代码"]').setValue("600519");
+    await wrapper.get(".quote-search input").setValue("600519");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(wrapper.text()).toContain("贵州茅台");
@@ -69,16 +69,17 @@ describe("计算器界面", () => {
   });
   it("股票ETF费率独立，持仓成本按净利润变化", async () => {
     wrapper = mount(App);
-    await wrapper.get('input[aria-label="原持仓数量"]').setValue("1000");
-    await wrapper.get('input[aria-label="原每股成本"]').setValue("10");
+    await wrapper
+      .get(".holding-inputs label:first-child input")
+      .setValue("1000");
+    await wrapper.get(".holding-inputs label:last-child input").setValue("10");
     expect(wrapper.find(".holding-result").text()).toContain("9.9995");
     await wrapper.get(".asset-tabs button:last-child").trigger("click");
     expect(wrapper.text()).toContain("ETF类别未确认");
-    await wrapper.get('input[aria-label="ETF每边最低佣金"]').setValue("0");
+    await wrapper.findAll(".fee-inputs input")[1].setValue("0");
     await wrapper.get(".asset-tabs button:first-child").trigger("click");
     expect(
-      wrapper.get<HTMLInputElement>('input[aria-label="股票每边最低佣金"]')
-        .element.value,
+      wrapper.findAll<HTMLInputElement>(".fee-inputs input")[1].element.value,
     ).toBe("5");
   });
   it("反向测算使用固定卖价，恢复上次输入", async () => {

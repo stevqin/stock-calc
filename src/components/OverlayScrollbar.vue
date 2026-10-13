@@ -210,14 +210,7 @@ onBeforeUnmount(() => {
       ref="thumb"
       class="overlay-scroll-thumb"
       :class="{ 'is-visible': visible }"
-      role="scrollbar"
-      aria-label="纵向滚动"
-      aria-orientation="vertical"
-      :aria-controls="metrics.id"
-      :aria-valuemin="0"
-      :aria-valuemax="metrics.max"
-      :aria-valuenow="Math.round(metrics.value)"
-      :aria-hidden="!visible"
+      data-testid="overlay-scroll-thumb"
       :tabindex="visible ? 0 : -1"
       :style="{
         left: metrics.left + 'px',

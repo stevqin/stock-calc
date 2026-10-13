@@ -126,10 +126,7 @@ function tone(field: QuoteField): string {
 }
 </script>
 <template>
-  <section
-    class="quote-details"
-    :aria-label="heroOnly ? '股价概览' : '完整行情指标'"
-  >
+  <section class="quote-details">
     <div v-if="!hideHero" class="quote-hero">
       <strong :class="tone({ index: 3, label: '', fallback: 'latest' })">{{
         formatQuoteField(quote?.latest ?? "", "元").replace(/元$/, "")
@@ -199,29 +196,31 @@ function tone(field: QuoteField): string {
           </div>
         </dl>
       </div>
-      <div
-        class="quote-market-view"
-        :class="{
-          'quote-market-wide': mode === 'daily' || mode === 'five-day',
-        }"
-      >
-        <div v-if="$slots.toolbar" class="quote-chart-toolbar">
-          <slot name="toolbar" />
+      <div class="quote-market-view">
+        <div class="quote-chart-tabs">
+          <slot name="chart-tabs" />
         </div>
-        <div class="quote-chart-main">
-          <slot name="chart" :set-chip-visible="setChipVisible" />
+        <div
+          class="quote-market-content"
+          :class="{
+            'quote-market-wide': mode === 'daily' || mode === 'five-day',
+          }"
+        >
+          <div class="quote-chart-main">
+            <slot name="chart" :set-chip-visible="setChipVisible" />
+          </div>
+          <DailyStudies
+            v-if="mode === 'daily' && chipsVisible"
+            :data="currentDaily"
+            :quote="quote"
+            :error="historyError"
+          />
+          <OrderBook
+            v-else-if="!mode || mode === 'intraday'"
+            :quote="quote"
+            compact
+          />
         </div>
-        <DailyStudies
-          v-if="mode === 'daily' && chipsVisible"
-          :data="currentDaily"
-          :quote="quote"
-          :error="historyError"
-        />
-        <OrderBook
-          v-else-if="!mode || mode === 'intraday'"
-          :quote="quote"
-          compact
-        />
       </div>
       <details class="quote-extra">
         <summary>更多指标</summary>
@@ -272,7 +271,7 @@ function tone(field: QuoteField): string {
 }
 .quote-hero > strong {
   display: block;
-  font-size: 40px;
+  font-size: 36px;
   line-height: 1.1;
   font-weight: 500;
   letter-spacing: -1px;
@@ -326,10 +325,13 @@ dd {
   color: #188552;
 }
 .quote-market-view {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 226px;
   border-top: 1px solid #e8edf2;
   margin-bottom: 12px;
+}
+.quote-market-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 226px;
+  position: relative;
 }
 .quote-chart-main {
   min-width: 0;
@@ -384,7 +386,7 @@ summary span {
   dd {
     font-size: 12px;
   }
-  .quote-market-view {
+  .quote-market-content {
     grid-template-columns: minmax(0, 1fr) 190px;
   }
 }
@@ -397,7 +399,7 @@ summary span {
     gap: 2px;
     margin-bottom: 9px;
   }
-  .quote-market-view {
+  .quote-market-content {
     grid-template-columns: minmax(0, 1fr) 160px;
   }
   .quote-extra-grid {
@@ -424,7 +426,7 @@ summary span {
 .quote-phases dd {
   font-size: 12px;
 }
-.quote-market-view {
+.quote-market-content {
   grid-template-columns: minmax(0, 1fr) 180px;
 }
 .quote-reference-grid {
@@ -441,26 +443,20 @@ summary span {
     width: 185px;
     gap: 7px 10px;
   }
-  .quote-market-view {
+  .quote-market-content {
     grid-template-columns: minmax(0, 1fr) 155px;
   }
 }
-.quote-market-view.quote-market-wide {
+.quote-market-content.quote-market-wide {
   grid-template-columns: minmax(0, 1fr);
 }
-.quote-chart-toolbar {
-  grid-column: 1 / -1;
-}
-.quote-chart-toolbar :deep(.segmented) {
+.quote-chart-tabs :deep(.segmented) {
   margin-top: 0;
   margin-bottom: 4px;
 }
 .quote-chart-main :deep(.drawer-chart) {
   height: 408px;
   min-height: 408px;
-}
-.quote-market-view {
-  position: relative;
 }
 .quote-market-wide > :deep(.daily-studies) {
   position: absolute;

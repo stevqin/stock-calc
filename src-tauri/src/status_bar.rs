@@ -23,7 +23,7 @@ impl PanelFocus {
 }
 
 struct Rotation {
-    frames: Vec<String>,
+    frames: Vec<Frame>,
     index: usize,
     paused: bool,
     updated: Instant,
@@ -31,7 +31,7 @@ struct Rotation {
 impl Default for Rotation {
     fn default() -> Self {
         Self {
-            frames: vec!["T刻 · 加载中".into()],
+            frames: vec![Frame::loading()],
             index: 0,
             paused: false,
             updated: Instant::now(),
@@ -39,29 +39,89 @@ impl Default for Rotation {
     }
 }
 impl Rotation {
-    fn replace(&mut self, frames: Vec<String>) {
+    fn replace(&mut self, frames: Vec<Frame>) {
         self.frames = frames;
         self.index %= self.frames.len();
         self.updated = Instant::now();
     }
-    fn title(&self) -> String {
-        let title = &self.frames[self.index];
-        if self.updated.elapsed() > Duration::from_secs(60) && !title.ends_with('*') {
-            format!("{title} *")
-        } else {
-            title.clone()
-        }
+    fn frame(&self) -> Frame {
+        let mut frame = self.frames[self.index].clone();
+        frame.stale |= self.updated.elapsed() > Duration::from_secs(60);
+        frame
     }
     fn advance(&mut self) {
         if !self.paused {
             self.index = (self.index + 1) % self.frames.len();
         }
     }
+    fn select(&mut self, index: usize) -> bool {
+        if index >= self.frames.len() {
+            return false;
+        }
+        self.index = index;
+        true
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Tone {
+    Up,
+    Down,
+    Flat,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Frame {
+    label: String,
+    change: String,
+    daily_percent: String,
+    profit: String,
+    change_tone: Tone,
+    daily_percent_tone: Tone,
+    profit_tone: Tone,
+    stale: bool,
+}
+impl Frame {
+    fn plain(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            change: String::new(),
+            daily_percent: String::new(),
+            profit: String::new(),
+            change_tone: Tone::Flat,
+            daily_percent_tone: Tone::Flat,
+            profit_tone: Tone::Flat,
+            stale: false,
+        }
+    }
+    fn loading() -> Self {
+        Self::plain("T刻 · 加载中")
+    }
+    fn top_line(&self) -> String {
+        if self.change.is_empty() {
+            format!("{}{}", self.label, self.daily_percent)
+        } else {
+            format!("{}{}｜{}", self.label, self.change, self.daily_percent)
+        }
+    }
+    fn text(&self) -> String {
+        if self.change.is_empty() && self.daily_percent.is_empty() && self.profit.is_empty() {
+            return format!("{}{}", self.label, if self.stale { " *" } else { "" });
+        }
+        format!(
+            "{}\n{}{}",
+            self.top_line(),
+            self.profit,
+            if self.stale { " *" } else { "" }
+        )
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Holding {
     id: String,
+    market: String,
+    code: String,
     name: String,
     short_name: String,
     holding_profit: Option<String>,
@@ -73,6 +133,17 @@ pub struct Holding {
     stale: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trade {
+    id: String,
+    security_id: String,
+    kind: String,
+    quantity: String,
+    price: String,
+    time: String,
+    date: String,
+}
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Total {
     percent: Option<String>,
     profit: Option<String>,
@@ -81,7 +152,9 @@ pub struct Total {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
-    frames: Vec<String>,
+    frames: Vec<Frame>,
+    #[serde(default)]
+    trades: Vec<Trade>,
     holdings: Vec<Holding>,
     total: Total,
     date: String,
@@ -90,10 +163,74 @@ pub struct Snapshot {
 #[derive(Default)]
 pub struct StatusBar(Mutex<Rotation>, Mutex<Option<Snapshot>>);
 
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TitleRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+#[cfg(any(target_os = "macos", test))]
+impl TitleRect {
+    const fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TitleAlignment {
+    Right,
+}
+#[cfg(any(target_os = "macos", test))]
+struct StatusTitleLayout {
+    name: TitleRect,
+    top: TitleRect,
+    bottom: TitleRect,
+    name_alignment: TitleAlignment,
+    metric_font_size: f64,
+}
+#[cfg(any(target_os = "macos", test))]
+fn status_title_layout(width: f64, height: f64) -> StatusTitleLayout {
+    let horizontal_margin = 4.0;
+    let name_width = 66.0;
+    let column_gap = 3.0;
+    let name_height = 14.0;
+    let row_height = 10.0;
+    let content_height = row_height * 2.0;
+    let top = ((height - content_height) / 2.0).max(0.0);
+    let right_x = horizontal_margin + name_width + column_gap;
+    let right_width = (width - right_x - horizontal_margin).max(0.0);
+    StatusTitleLayout {
+        name: TitleRect::new(
+            horizontal_margin,
+            ((height - name_height) / 2.0).max(0.0),
+            name_width,
+            name_height,
+        ),
+        // NSStatusBarButton uses a flipped coordinate system: smaller y is higher.
+        top: TitleRect::new(right_x, top, right_width, row_height),
+        bottom: TitleRect::new(right_x, top + row_height, right_width, row_height),
+        name_alignment: TitleAlignment::Right,
+        metric_font_size: 9.0,
+    }
+}
+#[cfg(any(target_os = "macos", test))]
+fn status_name_font_size(name: &str, available_width: f64) -> f64 {
+    let glyphs = name.chars().count().max(1) as f64;
+    (available_width / glyphs).clamp(8.0, 11.0)
+}
+
 // The underlying NSStatusItem length is in points, independent of title glyph widths.
-fn set_title(tray: &tauri::tray::TrayIcon, title: String) -> tauri::Result<()> {
+fn set_title(tray: &tauri::tray::TrayIcon, frame: Frame) -> tauri::Result<()> {
+    let title = frame.text();
     #[cfg(target_os = "macos")]
-    tray.with_inner_tray_icon(|inner| {
+    tray.with_inner_tray_icon(move |inner| {
         if let Some(item) = inner.ns_status_item() {
             item.setLength(160.0);
         }
@@ -103,30 +240,143 @@ fn set_title(tray: &tauri::tray::TrayIcon, title: String) -> tauri::Result<()> {
     tray.set_title(Some(&title))?;
     tray.set_tooltip(Some(&title))?;
     #[cfg(target_os = "macos")]
-    tray.with_inner_tray_icon(|inner| {
-        use objc2::MainThreadMarker;
-        use objc2_app_kit::NSAutoresizingMaskOptions;
+    tray.with_inner_tray_icon(move |inner| {
+        use objc2::{runtime::AnyObject, MainThreadMarker};
+        use objc2_app_kit::{
+            NSAutoresizingMaskOptions, NSColor, NSFont, NSForegroundColorAttributeName,
+            NSTextAlignment, NSTextField,
+        };
+        use objc2_foundation::{
+            NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString,
+        };
         let mtm = MainThreadMarker::new().expect("Tauri dispatches tray operations on main thread");
         if let Some(item) = inner.ns_status_item() {
             if let Some(button) = item.button(mtm) {
-                button.setFont(Some(&objc2_app_kit::NSFont::systemFontOfSize(11.0)));
-                button.setUsesSingleLineMode(true);
-                button.setAlignment(objc2_app_kit::NSTextAlignment::Right);
-                if let Some(cell) = button.cell() {
-                    cell.setWraps(false);
-                    cell.setScrollable(true);
-                }
+                let color = |tone: Tone| match tone {
+                    Tone::Up => NSColor::systemRedColor(),
+                    Tone::Down => NSColor::systemGreenColor(),
+                    Tone::Flat => NSColor::labelColor(),
+                };
+                let mut mouse_target = None;
                 for view in button.subviews() {
-                    // tray-icon creates this mouse-event overlay before AppKit has
-                    // necessarily laid out the title. Without autoresizing, the
-                    // uncovered button invokes NSStatusItem.menu on BOTH buttons.
-                    if view.class().name().to_bytes() == b"TaoTrayTarget" {
-                        view.setAutoresizingMask(
-                            NSAutoresizingMaskOptions::ViewWidthSizable
-                                | NSAutoresizingMaskOptions::ViewHeightSizable,
-                        );
-                        view.setFrame(button.bounds());
+                    match view.class().name().to_bytes() {
+                        b"TaoTrayTarget" => mouse_target = Some(view),
+                        b"NSTextField" => view.removeFromSuperview(),
+                        _ => {}
                     }
+                }
+
+                let empty = NSMutableAttributedString::from_nsstring(&NSString::from_str(""));
+                button.setAttributedTitle(&empty);
+                button.setUsesSingleLineMode(true);
+
+                if frame.change.is_empty()
+                    && frame.daily_percent.is_empty()
+                    && frame.profit.is_empty()
+                {
+                    let loading = NSTextField::labelWithString(
+                        &NSString::from_str(frame.label.trim_end()),
+                        mtm,
+                    );
+                    loading.setFrame(button.bounds());
+                    loading.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+                    loading.setTextColor(Some(&NSColor::labelColor()));
+                    loading.setAlignment(NSTextAlignment::Center);
+                    button.addSubview(&loading);
+                } else {
+                    let bounds = button.bounds();
+                    let layout = status_title_layout(bounds.size.width, bounds.size.height);
+                    let native_rect = |rect: TitleRect| {
+                        NSRect::new(
+                            NSPoint::new(rect.x, rect.y),
+                            NSSize::new(rect.width, rect.height),
+                        )
+                    };
+                    let display_name = frame.label.trim_end();
+                    let name_font = NSFont::systemFontOfSize(status_name_font_size(
+                        display_name,
+                        layout.name.width,
+                    ));
+                    let metric_font = NSFont::systemFontOfSize(layout.metric_font_size);
+
+                    let name = NSTextField::labelWithString(&NSString::from_str(display_name), mtm);
+                    name.setFrame(native_rect(layout.name));
+                    name.setFont(Some(&name_font));
+                    name.setTextColor(Some(&NSColor::labelColor()));
+                    name.setAlignment(match layout.name_alignment {
+                        TitleAlignment::Right => NSTextAlignment::Right,
+                    });
+
+                    let (top_text, daily_start) = if frame.change.is_empty() {
+                        (frame.daily_percent.clone(), 0)
+                    } else {
+                        (
+                            format!("{}｜{}", frame.change, frame.daily_percent),
+                            frame.change.encode_utf16().count() + "｜".encode_utf16().count(),
+                        )
+                    };
+                    let top_attributed =
+                        NSMutableAttributedString::from_nsstring(&NSString::from_str(&top_text));
+                    // SAFETY: the attribute values are NSColor instances and all ranges
+                    // use NSString UTF-16 code units.
+                    unsafe {
+                        top_attributed.addAttribute_value_range(
+                            NSForegroundColorAttributeName,
+                            NSColor::labelColor().as_ref() as &AnyObject,
+                            NSRange::new(0, top_text.encode_utf16().count()),
+                        );
+                        top_attributed.addAttribute_value_range(
+                            NSForegroundColorAttributeName,
+                            color(frame.change_tone).as_ref() as &AnyObject,
+                            NSRange::new(0, frame.change.encode_utf16().count()),
+                        );
+                        top_attributed.addAttribute_value_range(
+                            NSForegroundColorAttributeName,
+                            color(frame.daily_percent_tone).as_ref() as &AnyObject,
+                            NSRange::new(daily_start, frame.daily_percent.encode_utf16().count()),
+                        );
+                    }
+                    let top = NSTextField::labelWithAttributedString(&top_attributed, mtm);
+                    top.setFrame(native_rect(layout.top));
+                    top.setFont(Some(&metric_font));
+                    top.setAlignment(NSTextAlignment::Right);
+
+                    let bottom_text =
+                        format!("{}{}", frame.profit, if frame.stale { " *" } else { "" });
+                    let bottom_attributed =
+                        NSMutableAttributedString::from_nsstring(&NSString::from_str(&bottom_text));
+                    unsafe {
+                        bottom_attributed.addAttribute_value_range(
+                            NSForegroundColorAttributeName,
+                            NSColor::labelColor().as_ref() as &AnyObject,
+                            NSRange::new(0, bottom_text.encode_utf16().count()),
+                        );
+                        bottom_attributed.addAttribute_value_range(
+                            NSForegroundColorAttributeName,
+                            color(frame.profit_tone).as_ref() as &AnyObject,
+                            NSRange::new(0, frame.profit.encode_utf16().count()),
+                        );
+                    }
+                    let bottom = NSTextField::labelWithAttributedString(&bottom_attributed, mtm);
+                    bottom.setFrame(native_rect(layout.bottom));
+                    bottom.setFont(Some(&metric_font));
+                    bottom.setAlignment(NSTextAlignment::Right);
+
+                    button.addSubview(&name);
+                    button.addSubview(&top);
+                    button.addSubview(&bottom);
+                }
+
+                // Keep tray-icon's full-size event target above the text fields so the
+                // complete 160pt item responds uniformly to a click.
+                if let Some(view) = mouse_target {
+                    view.removeFromSuperview();
+                    button.addSubview(&view);
+                    view.setAutoresizingMask(
+                        NSAutoresizingMaskOptions::ViewWidthSizable
+                            | NSAutoresizingMaskOptions::ViewHeightSizable,
+                    );
+                    view.setFrame(button.bounds());
                 }
             }
         }
@@ -141,6 +391,9 @@ pub fn get_status_portfolio(state: tauri::State<StatusBar>) -> Result<Option<Sna
 pub fn hide_status_panel(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("status-panel") {
         window.hide().map_err(|e| e.to_string())?;
+        window
+            .emit("status-panel-visible", false)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -264,7 +517,10 @@ fn position_macos_panel(panel: &tauri::WebviewWindow) -> Result<(), String> {
         window.setFrame_display(frame, true);
     }
     panel.show().map_err(|e| e.to_string())?;
-    panel.set_focus().map_err(|e| e.to_string())
+    panel.set_focus().map_err(|e| e.to_string())?;
+    panel
+        .emit("status-panel-visible", true)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
@@ -293,7 +549,9 @@ fn toggle_panel(
         return Ok(());
     };
     if panel.is_visible()? {
-        return panel.hide();
+        panel.hide()?;
+        panel.emit("status-panel-visible", false)?;
+        return Ok(());
     }
     #[cfg(target_os = "macos")]
     {
@@ -330,7 +588,8 @@ fn toggle_panel(
             panel.set_position(PhysicalPosition::new(x, y))?;
         }
         panel.show()?;
-        panel.set_focus()
+        panel.set_focus()?;
+        panel.emit("status-panel-visible", true)
     }
 }
 
@@ -343,16 +602,18 @@ pub fn update_status_bar(
     let frames = &snapshot.frames;
     if frames.is_empty()
         || frames.len() > 1000
-        || frames
-            .iter()
-            .any(|s| s.chars().count() > 200 || s.contains(['\n', '\r']))
+        || frames.iter().any(|frame| {
+            [&frame.label, &frame.change, &frame.profit]
+                .iter()
+                .any(|s| s.chars().count() > 200 || s.contains(['\n', '\r']))
+        })
     {
         return Err("状态栏内容无效".into());
     }
     let (title, index) = {
         let mut rotation = state.0.lock().map_err(|e| e.to_string())?;
         rotation.replace(frames.clone());
-        (rotation.title(), rotation.index)
+        (rotation.frame(), rotation.index)
     };
     if let Some(tray) = app.tray_by_id("portfolio") {
         set_title(&tray, title).map_err(|e| e.to_string())?;
@@ -369,6 +630,19 @@ fn show_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        let _ = app.emit_to("main", "main-window-activated", ());
+    }
+}
+#[cfg(any(target_os = "macos", test))]
+struct PanelMaterialGeometry {
+    corner_radius: f64,
+    clips_content: bool,
+}
+#[cfg(any(target_os = "macos", test))]
+fn panel_material_geometry() -> PanelMaterialGeometry {
+    PanelMaterialGeometry {
+        corner_radius: 18.0,
+        clips_content: true,
     }
 }
 #[cfg(target_os = "macos")]
@@ -378,10 +652,19 @@ fn install_panel_material(panel: &tauri::WebviewWindow) -> Result<(), Box<dyn st
         NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle, NSWindow,
     };
     let mtm = MainThreadMarker::new().ok_or("玻璃材质必须运行在主线程")?;
+    let ptr = panel.ns_window()?;
+    // The host NSWindow must remain fully transparent and shadowless. AppKit's
+    // default rectangular window shadow otherwise remains visible behind the
+    // rounded glass content view.
+    unsafe {
+        let window = &*ptr.cast::<NSWindow>();
+        window.setOpaque(false);
+        window.setHasShadow(false);
+    }
     if objc2::available!(macos = 26.0) {
-        let ptr = panel.ns_window()?;
         // Tauri retains the live window; retain its content before reparenting.
         unsafe {
+            let geometry = panel_material_geometry();
             let window = &*ptr.cast::<NSWindow>();
             let content = window.contentView().ok_or("面板内容视图不可用")?;
             let glass = NSGlassEffectView::new(mtm);
@@ -391,7 +674,11 @@ fn install_panel_material(panel: &tauri::WebviewWindow) -> Result<(), Box<dyn st
                     | NSAutoresizingMaskOptions::ViewHeightSizable,
             );
             glass.setStyle(NSGlassEffectViewStyle::Regular);
-            glass.setCornerRadius(18.0);
+            glass.setCornerRadius(geometry.corner_radius);
+            // NSGlassEffectView rounds the glass itself, but it does not clip the
+            // embedded WebView by default. On bright backgrounds that rectangular
+            // child surface is visible outside the curved glass corners.
+            glass.setClipsToBounds(geometry.clips_content);
             window.setContentView(None);
             glass.setContentView(Some(&content));
             window.setContentView(Some(&glass));
@@ -410,6 +697,26 @@ fn install_panel_material(panel: &tauri::WebviewWindow) -> Result<(), Box<dyn st
 pub fn get_status_active_index(state: tauri::State<StatusBar>) -> Result<usize, String> {
     Ok(state.0.lock().map_err(|e| e.to_string())?.index)
 }
+#[tauri::command]
+pub fn set_status_active_index(
+    app: tauri::AppHandle,
+    state: tauri::State<StatusBar>,
+    index: usize,
+) -> Result<usize, String> {
+    let frame = {
+        let mut rotation = state.0.lock().map_err(|e| e.to_string())?;
+        if !rotation.select(index) {
+            return Err("股票索引无效".into());
+        }
+        rotation.frame()
+    };
+    if let Some(tray) = app.tray_by_id("portfolio") {
+        set_title(&tray, frame).map_err(|e| e.to_string())?;
+    }
+    app.emit_to("status-panel", "status-active-index", index)
+        .map_err(|e| e.to_string())?;
+    Ok(index)
+}
 pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(StatusBar::default());
     let panel = WebviewWindowBuilder::new(
@@ -420,6 +727,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
     .title("T刻 · 持仓速览")
     .inner_size(300.0, 520.0)
     .transparent(true)
+    .shadow(false)
     .visible(false)
     .decorations(false)
     .resizable(false)
@@ -436,6 +744,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
             if let Ok(mut focus) = focus.lock() {
                 if focus.changed(*focused) {
                     let _ = panel_handle.hide();
+                    let _ = panel_handle.emit("status-panel-visible", false);
                 }
             }
         }
@@ -461,7 +770,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
             }
         })
         .build(app)?;
-    set_title(&tray, "T刻 · 加载中".into())?;
+    set_title(&tray, Frame::loading())?;
     let handle = app.handle().clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(5));
@@ -471,7 +780,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
                 break;
             };
             rotation.advance();
-            (rotation.title(), rotation.index)
+            (rotation.frame(), rotation.index)
         };
         let Some(tray) = handle.tray_by_id("portfolio") else {
             break;
@@ -494,6 +803,54 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rotation_selects_a_valid_frame_and_rejects_an_invalid_index() {
+        let mut rotation = Rotation::default();
+        rotation.replace(vec![Frame::plain("one"), Frame::plain("two")]);
+        assert!(rotation.select(1));
+        assert_eq!(rotation.index, 1);
+        assert!(!rotation.select(2));
+        assert_eq!(rotation.index, 1);
+    }
+
+    #[test]
+    fn frame_keeps_independent_tones_and_formats_delay_marker() {
+        let frame = Frame {
+            label: "茅台 ".into(),
+            change: "+1.25%".into(),
+            daily_percent: "-0.30%".into(),
+            profit: "-¥320".into(),
+            change_tone: Tone::Up,
+            daily_percent_tone: Tone::Down,
+            profit_tone: Tone::Down,
+            stale: true,
+        };
+        assert_eq!(frame.change_tone, Tone::Up);
+        assert_eq!(frame.daily_percent_tone, Tone::Down);
+        assert_eq!(frame.profit_tone, Tone::Down);
+        assert_eq!(frame.text(), "茅台 +1.25%｜-0.30%\n-¥320 *");
+    }
+
+    #[test]
+    fn status_title_keeps_the_name_readable_and_orders_rows_in_flipped_coordinates() {
+        let layout = status_title_layout(160.0, 24.0);
+        assert_eq!(layout.name, TitleRect::new(4.0, 5.0, 66.0, 14.0));
+        assert_eq!(layout.top, TitleRect::new(73.0, 2.0, 83.0, 10.0));
+        assert_eq!(layout.bottom, TitleRect::new(73.0, 12.0, 83.0, 10.0));
+        assert_eq!(status_name_font_size("茅台", layout.name.width), 11.0);
+        assert_eq!(
+            status_name_font_size("一二三四五六七八", layout.name.width),
+            8.25
+        );
+        assert_eq!(layout.name_alignment, TitleAlignment::Right);
+        assert_eq!(layout.metric_font_size, 9.0);
+    }
+    #[test]
+    fn panel_material_clips_the_rectangular_webview_to_its_rounded_shape() {
+        let geometry = panel_material_geometry();
+        assert_eq!(geometry.corner_radius, 18.0);
+        assert!(geometry.clips_content);
+    }
     #[cfg(target_os = "macos")]
     #[test]
     fn popup_can_join_fullscreen_spaces_without_conflicting_document_flags() {
@@ -566,11 +923,13 @@ mod tests {
     #[test]
     fn stale_marker_is_a_single_asterisk_even_while_paused() {
         let mut rotation = Rotation::default();
-        rotation.replace(vec!["茅台 +1.25%｜+¥320 *".into()]);
+        let mut frame = Frame::plain("茅台 +1.25%｜+¥320");
+        frame.stale = true;
+        rotation.replace(vec![frame]);
         rotation.paused = true;
         rotation.updated = Instant::now() - Duration::from_secs(61);
         rotation.advance();
-        assert_eq!(rotation.title(), "茅台 +1.25%｜+¥320 *");
+        assert_eq!(rotation.frame().text(), "茅台 +1.25%｜+¥320 *");
     }
     #[test]
     fn startup_blur_does_not_dismiss_panel_before_focus_arrives() {
@@ -586,26 +945,30 @@ mod tests {
     #[test]
     fn cycles_holdings_then_summary_and_wraps() {
         let mut r = Rotation::default();
-        r.replace(vec!["A".into(), "B".into(), "合计".into()]);
-        assert_eq!(r.title(), "A");
+        r.replace(vec![
+            Frame::plain("A"),
+            Frame::plain("B"),
+            Frame::plain("合计"),
+        ]);
+        assert_eq!(r.frame().text(), "A");
         r.advance();
-        assert_eq!(r.title(), "B");
+        assert_eq!(r.frame().text(), "B");
         r.advance();
-        assert_eq!(r.title(), "合计");
+        assert_eq!(r.frame().text(), "合计");
         r.advance();
-        assert_eq!(r.title(), "A");
+        assert_eq!(r.frame().text(), "A");
     }
     #[test]
     fn pause_keeps_position_but_accepts_new_quotes_and_removed_holdings() {
         let mut r = Rotation::default();
-        r.replace(vec!["A".into(), "合计".into()]);
+        r.replace(vec![Frame::plain("A"), Frame::plain("合计")]);
         r.advance();
         r.paused = true;
         r.advance();
-        assert_eq!(r.title(), "合计");
-        r.replace(vec!["新合计".into()]);
-        assert_eq!(r.title(), "新合计");
+        assert_eq!(r.frame().text(), "合计");
+        r.replace(vec![Frame::plain("新合计")]);
+        assert_eq!(r.frame().text(), "新合计");
         r.updated = Instant::now() - Duration::from_secs(61);
-        assert_eq!(r.title(), "新合计 *");
+        assert_eq!(r.frame().text(), "新合计 *");
     }
 }

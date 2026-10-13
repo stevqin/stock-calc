@@ -4,6 +4,10 @@ import MarketChart from "./MarketChart.vue";
 import { getChart, marketQuotes } from "../market";
 import { manualAccount } from "../sim/record";
 import type { ChartData } from "../sim/chart";
+const native = vi.hoisted(() => ({
+  activated: undefined as (() => void) | undefined,
+  unlisten: vi.fn(),
+}));
 const chart = vi.hoisted(() => ({
   setOption: vi.fn(),
   on: vi.fn(),
@@ -13,6 +17,12 @@ const chart = vi.hoisted(() => ({
 }));
 vi.mock("echarts/core", () => ({ use: vi.fn(), init: () => chart }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (event, callback) => {
+    if (event === "main-window-activated") native.activated = callback;
+    return native.unlisten;
+  }),
+}));
 vi.mock("../market", () => ({
   getChart: vi.fn(),
   liveDaily: (d: unknown) => d,
@@ -70,6 +80,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   wrapper?.unmount();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 it.each(["daily", "intraday", "five-day"] as const)(
@@ -125,6 +136,19 @@ it.each(["daily", "intraday", "five-day"] as const)(
     expect(getChart).toHaveBeenCalledTimes(1);
   },
 );
+it("原生窗口重新显示时强制刷新图表，即使 WebKit 仍报告隐藏", async () => {
+  let hidden = false;
+  vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+  wrapper = mount(MarketChart, {
+    props: { security, mode: "intraday", trades: [] },
+  });
+  await flushPromises();
+  expect(getChart).toHaveBeenCalledTimes(1);
+  hidden = true;
+  native.activated?.();
+  await flushPromises();
+  expect(getChart).toHaveBeenCalledTimes(2);
+});
 it("分时与五日分时使用价格/涨跌幅双轴，展示行情摘要且禁止缩放", async () => {
   wrapper = mount(MarketChart, {
     props: { security, mode: "intraday", trades: [] },

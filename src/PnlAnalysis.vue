@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateTimeField from "./components/DateTimeField.vue";
 import {
   computed,
   ref,
@@ -64,6 +65,9 @@ const selectedYear = ref(today.value.slice(0, 4));
 const selectedMonth = ref(currentMonth.value);
 const selectedDay = ref("");
 const dayDetail = ref<HTMLDialogElement>();
+const contributionExpanded = ref(false);
+const contributionDialog = ref<HTMLDialogElement>();
+let contributionTrigger: HTMLElement | undefined;
 let dayTrigger: HTMLElement | undefined;
 function openDay(date: string, event: MouseEvent) {
   dayTrigger = event.currentTarget as HTMLElement;
@@ -77,6 +81,20 @@ function closeDay() {
 watch(selectedDay, async (date) => {
   await nextTick();
   if (date && selectedDay.value === date) dayDetail.value?.showModal();
+});
+function openContributions(event: MouseEvent) {
+  contributionTrigger = event.currentTarget as HTMLElement;
+  contributionExpanded.value = true;
+}
+function closeContributions() {
+  contributionDialog.value?.close();
+  contributionExpanded.value = false;
+  contributionTrigger?.focus({ preventScroll: true });
+}
+watch(contributionExpanded, async (expanded) => {
+  await nextTick();
+  if (expanded && contributionExpanded.value)
+    contributionDialog.value?.showModal();
 });
 const years = computed(() =>
   Array.from(
@@ -413,11 +431,44 @@ const cashNames: Record<string, string> = {
   "other-income": "其他收入",
   "legacy-balance": "期初资金（不计收益）",
 };
-const contributions = computed(() =>
-  [...summary.value.contributions].sort(
-    (a, b) => Number(b.profit ?? -Infinity) - Number(a.profit ?? -Infinity),
-  ),
-);
+type ContributionSortKey = "security" | "profit" | "returnRate" | "realized";
+const contributionSort = ref<{
+  key: ContributionSortKey;
+  direction: "asc" | "desc";
+}>({ key: "profit", direction: "desc" });
+function sortContributions(key: ContributionSortKey) {
+  if (contributionSort.value.key === key)
+    contributionSort.value.direction =
+      contributionSort.value.direction === "desc" ? "asc" : "desc";
+  else
+    contributionSort.value = {
+      key,
+      direction: key === "security" ? "asc" : "desc",
+    };
+}
+function contributionSortMark(key: ContributionSortKey) {
+  if (contributionSort.value.key !== key) return "";
+  return contributionSort.value.direction === "desc" ? "↓" : "↑";
+}
+const contributions = computed(() => {
+  const direction = contributionSort.value.direction === "asc" ? 1 : -1;
+  const key = contributionSort.value.key;
+  return [...summary.value.contributions].sort((a, b) => {
+    if (key === "security")
+      return (
+        (names.value.get(a.securityId) ?? a.securityId).localeCompare(
+          names.value.get(b.securityId) ?? b.securityId,
+          "zh-CN",
+        ) * direction
+      );
+    const left = a[key];
+    const right = b[key];
+    if (left === null && right === null) return 0;
+    if (left === null) return 1;
+    if (right === null) return -1;
+    return new Decimal(left).comparedTo(right) * direction;
+  });
+});
 const chart = computed(() => {
   const days = analysis.value.days.filter(
     (d) => d.date >= range.value.start && d.date <= range.value.end,
@@ -456,7 +507,7 @@ const chart = computed(() => {
 </script>
 
 <template>
-  <section class="pnl-analysis" aria-label="盈亏分析">
+  <section class="pnl-analysis">
     <header class="pnl-heading">
       <div>
         <h2>盈亏分析</h2>
@@ -465,7 +516,7 @@ const chart = computed(() => {
       <span class="pnl-data-origin">账本起点 {{ firstDate }} · 金额 / 元</span>
     </header>
     <div class="pnl-range-toolbar">
-      <div class="pnl-segments" aria-label="分析时间范围">
+      <div class="pnl-segments">
         <button
           v-for="p in [
             { id: '1m', label: '最近一月' },
@@ -476,23 +527,22 @@ const chart = computed(() => {
           ]"
           :key="p.id"
           :class="{ active: preset === p.id }"
-          :aria-pressed="preset === p.id"
           @click="preset = p.id"
         >
           {{ p.label }}
         </button>
       </div>
       <div v-if="preset === 'custom'" class="pnl-date-range">
-        <input
+        <DateTimeField
           v-model="customStart"
-          type="date"
-          aria-label="分析开始日期"
+          mode="date"
+          test-id="analysis-start-date"
           :max="customEnd"
         /><span>至</span
-        ><input
+        ><DateTimeField
           v-model="customEnd"
-          type="date"
-          aria-label="分析结束日期"
+          mode="date"
+          test-id="analysis-end-date"
           :min="customStart"
           :max="today"
         />
@@ -501,13 +551,13 @@ const chart = computed(() => {
         >{{ range.start }} — {{ range.end }}</span
       >
     </div>
-    <p v-if="!validRange" role="alert" class="pnl-warning">
+    <p v-if="!validRange" class="pnl-warning">
       请选择有效的起止日期，结束日期不能晚于今天。
     </p>
     <p v-if="!hasRecords" class="pnl-empty">
       还没有账本记录。录入交易或资金流水后，即可查看收益分析。
     </p>
-    <div v-if="loading" class="pnl-loading" role="status">
+    <div v-if="loading" class="pnl-loading">
       正在补充历史行情，已有数据可继续查看…
     </div>
     <details v-if="errors.length" class="pnl-warning">
@@ -528,17 +578,20 @@ const chart = computed(() => {
           }}</strong
           ><span class="pnl-total-return" :title="summary.rateReason"
             >证券盈亏率
-            <b aria-label="区间盈亏率" :class="tone(summary.returnRate)">{{
+            <b class="range-return" :class="tone(summary.returnRate)">{{
               percent(summary.returnRate)
             }}</b></span
           ><small>含持仓涨跌及利息等收入，已扣交易费用</small>
         </div>
         <div class="pnl-metric">
-          <span>已实现盈亏</span
+          <span>区间卖出盈亏</span
           ><strong :class="tone(summary.realized)">{{
             money(hasRecords ? summary.realized : null, true)
           }}</strong
-          ><small>按卖出对应的持仓成本计算</small>
+          ><small
+            >卖出盈亏＝卖出净收入−按 FIFO
+            匹配的买入成本，包含部分卖出和已经清仓的交易。</small
+          >
         </div>
         <div class="pnl-metric">
           <span>浮动盈亏变化</span
@@ -591,7 +644,7 @@ const chart = computed(() => {
         <summary>
           所选区间有 {{ summary.missingDays }} 日缺少收益基准，查看缺失日期
         </summary>
-        <p>完整总盈亏暂不可用；已实现盈亏和手续费仍按账本展示。</p>
+        <p>完整总盈亏暂不可用；区间卖出盈亏和手续费仍按账本展示。</p>
         <button :disabled="loading" @click="retryToken++">补充历史行情</button>
         <ul>
           <li v-for="item in missingRanges" :key="item.start">
@@ -610,8 +663,6 @@ const chart = computed(() => {
             v-if="chart.points.length && hasRecords"
             class="pnl-trend"
             viewBox="0 0 720 204"
-            role="img"
-            aria-label="所选时间范围的累计盈亏曲线"
           >
             <line
               x1="52"
@@ -652,15 +703,52 @@ const chart = computed(() => {
         <section class="pnl-panel pnl-contribution">
           <header>
             <h3>证券盈亏贡献</h3>
-            <span>所选区间</span>
+            <div class="pnl-contribution-header-actions">
+              <span>所选区间</span>
+              <button class="pnl-expand-button" @click="openContributions">
+                放大查看
+              </button>
+            </div>
           </header>
           <div class="pnl-contribution-scroll">
-            <table>
+            <table class="pnl-contribution-table">
               <thead>
                 <tr>
-                  <th>证券</th>
-                  <th>区间盈亏</th>
-                  <th>已实现</th>
+                  <th>
+                    <button
+                      data-contribution-sort="security"
+                      @click="sortContributions('security')"
+                    >
+                      证券 <small>{{ contributionSortMark("security") }}</small>
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      data-contribution-sort="profit"
+                      @click="sortContributions('profit')"
+                    >
+                      区间盈亏
+                      <small>{{ contributionSortMark("profit") }}</small>
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      data-contribution-sort="returnRate"
+                      @click="sortContributions('returnRate')"
+                    >
+                      区间收益率
+                      <small>{{ contributionSortMark("returnRate") }}</small>
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      data-contribution-sort="realized"
+                      @click="sortContributions('realized')"
+                    >
+                      卖出盈亏
+                      <small>{{ contributionSortMark("realized") }}</small>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -671,6 +759,9 @@ const chart = computed(() => {
                   </td>
                   <td :class="tone(item.profit)">
                     {{ money(item.profit, true) }}
+                  </td>
+                  <td :class="tone(item.returnRate)" :title="item.rateReason">
+                    {{ percent(item.returnRate) }}
                   </td>
                   <td :class="tone(item.realized)">
                     {{ money(item.realized, true) }}
@@ -698,7 +789,7 @@ const chart = computed(() => {
           </p>
         </div>
         <div class="pnl-calendar-controls">
-          <div class="pnl-segments" aria-label="收益日历视图">
+          <div class="pnl-segments">
             <button
               v-for="v in [
                 { id: 'all', label: '全部' },
@@ -706,7 +797,6 @@ const chart = computed(() => {
                 { id: 'month', label: '月' },
               ] as const"
               :key="v.id"
-              :aria-pressed="calendarView === v.id"
               :class="{ active: calendarView === v.id }"
               @click="calendarView = v.id"
             >
@@ -716,16 +806,16 @@ const chart = computed(() => {
           <select
             v-if="calendarView === 'year'"
             v-model="selectedYear"
-            aria-label="选择年份"
+            class="pnl-year-select"
           >
             <option v-for="year in years" :key="year" :value="year">
               {{ year }}年
             </option></select
-          ><input
+          ><DateTimeField
             v-if="calendarView === 'month'"
             v-model="selectedMonth"
-            type="month"
-            aria-label="选择月份"
+            mode="month"
+            test-id="analysis-month"
             :max="currentMonth"
           />
         </div>
@@ -759,7 +849,7 @@ const chart = computed(() => {
         </button>
       </div>
       <div v-else class="pnl-months">
-        <div class="pnl-month-grid" aria-label="最近十二个月收益日历">
+        <div class="pnl-month-grid">
           <article
             v-for="month in monthCalendars"
             :key="month.month"
@@ -808,7 +898,6 @@ const chart = computed(() => {
                 :disabled="
                   cell.date > today || cell.date < firstDate || !hasRecords
                 "
-                :aria-label="`${cell.date} ${cell.status || money(cell.day?.profit, true) + '元'}，证券盈亏率 ${percent(cell.day?.returnRate)}，查看详情`"
                 :title="
                   cell.day?.reasons.join('；') ||
                   cell.day?.rateReason ||
@@ -839,17 +928,95 @@ const chart = computed(() => {
       </p>
     </section>
     <dialog
+      v-if="contributionExpanded"
+      ref="contributionDialog"
+      class="pnl-panel pnl-contribution-dialog"
+      @cancel.prevent="closeContributions"
+      @click.self="closeContributions"
+    >
+      <div class="pnl-contribution-dialog-content">
+        <header>
+          <div>
+            <h3>证券盈亏贡献</h3>
+            <p>
+              {{ range.start }} — {{ range.end }} ·
+              {{ contributions.length }} 只
+            </p>
+          </div>
+          <button
+            autofocus
+            class="pnl-contribution-dialog-close"
+            @click="closeContributions"
+          >
+            关闭
+          </button>
+        </header>
+        <div class="pnl-contribution-scroll">
+          <table class="pnl-contribution-table">
+            <thead>
+              <tr>
+                <th>
+                  <button @click="sortContributions('security')">
+                    证券 <small>{{ contributionSortMark("security") }}</small>
+                  </button>
+                </th>
+                <th>
+                  <button @click="sortContributions('profit')">
+                    区间盈亏 <small>{{ contributionSortMark("profit") }}</small>
+                  </button>
+                </th>
+                <th>
+                  <button @click="sortContributions('returnRate')">
+                    区间收益率
+                    <small>{{ contributionSortMark("returnRate") }}</small>
+                  </button>
+                </th>
+                <th>
+                  <button @click="sortContributions('realized')">
+                    卖出盈亏
+                    <small>{{ contributionSortMark("realized") }}</small>
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in contributions" :key="item.securityId">
+                <td>
+                  {{ names.get(item.securityId) ?? item.securityId
+                  }}<small>{{ item.securityId.slice(2) }}</small>
+                </td>
+                <td :class="tone(item.profit)">
+                  {{ money(item.profit, true) }}
+                </td>
+                <td :class="tone(item.returnRate)" :title="item.rateReason">
+                  {{ percent(item.returnRate) }}
+                </td>
+                <td :class="tone(item.realized)">
+                  {{ money(item.realized, true) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="!contributions.length" class="pnl-empty">
+            该区间暂无证券记录
+          </p>
+        </div>
+        <p class="pnl-note">
+          收益率按每只证券每日收益率复利累计；缺少估值基准或有效资金基数时显示“—”。点击表头可切换排序。
+        </p>
+      </div>
+    </dialog>
+    <dialog
       v-if="selectedDay"
       ref="dayDetail"
       class="pnl-panel pnl-day-detail"
-      aria-labelledby="pnl-day-title"
       @cancel.prevent="closeDay"
       @click.self="closeDay"
     >
       <div class="pnl-day-dialog-content">
         <header>
           <h3 id="pnl-day-title">{{ selectedDay }} · 收益明细</h3>
-          <button autofocus aria-label="关闭收益明细" @click="closeDay">
+          <button autofocus class="pnl-day-close" @click="closeDay">
             关闭
           </button>
         </header>
@@ -861,7 +1028,7 @@ const chart = computed(() => {
             }}</b></span
           ><span :title="detail?.rateReason"
             >证券盈亏率
-            <b aria-label="当日盈亏率" :class="tone(detail?.returnRate)">{{
+            <b class="day-return" :class="tone(detail?.returnRate)">{{
               percent(detail?.returnRate)
             }}</b></span
           ><span>手续费 {{ money(detail?.fees) }}</span
@@ -875,7 +1042,7 @@ const chart = computed(() => {
             <tr>
               <th>证券</th>
               <th>当日盈亏</th>
-              <th>已实现盈亏</th>
+              <th>当日卖出盈亏</th>
               <th>手续费</th>
             </tr>
           </thead>

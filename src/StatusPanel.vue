@@ -1,14 +1,24 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount } from "vue";
+import {
+  computed,
+  ref,
+  reactive,
+  onMounted,
+  onBeforeUnmount,
+  watch,
+} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emitTo, type UnlistenFn } from "@tauri-apps/api/event";
 import { signed, statusTone, type StatusSnapshot } from "./statusBar";
+import StatusIntradayChart from "./components/StatusIntradayChart.vue";
 const snapshot = ref<StatusSnapshot>();
 const error = ref("");
 const editing = ref(false);
 const activeIndex = ref<number | null>(null);
 const paused = ref<boolean | null>(null);
 const changingPause = ref(false);
+const panelVisible = ref(false);
+const lastStockIndex = ref(0);
 const drafts = reactive<Record<string, string>>({});
 function toggleEditing() {
   if (!editing.value) {
@@ -20,7 +30,28 @@ function toggleEditing() {
 }
 let stop: UnlistenFn | undefined;
 let stopActive: UnlistenFn | undefined;
+let stopVisible: UnlistenFn | undefined;
 let disposed = false;
+watch(activeIndex, (index) => {
+  if (
+    index !== null &&
+    index >= 0 &&
+    index < (snapshot.value?.holdings.length ?? 0)
+  )
+    lastStockIndex.value = index;
+});
+watch(snapshot, (next) => {
+  if (!next?.holdings.length) return;
+  if (activeIndex.value !== null && activeIndex.value < next.holdings.length)
+    lastStockIndex.value = activeIndex.value;
+  else if (lastStockIndex.value >= next.holdings.length)
+    lastStockIndex.value = next.holdings.length - 1;
+});
+const chartHolding = computed(() => {
+  const rows = snapshot.value?.holdings ?? [];
+  if (!rows.length) return null;
+  return rows[Math.min(lastStockIndex.value, rows.length - 1)];
+});
 async function close() {
   await invoke("hide_status_panel");
 }
@@ -29,6 +60,15 @@ async function openMain() {
     await invoke("open_status_main");
   } catch {
     error.value = "主界面暂时无法打开，请重试";
+  }
+}
+async function selectHolding(index: number) {
+  try {
+    activeIndex.value = await invoke<number>("set_status_active_index", {
+      index,
+    });
+  } catch {
+    error.value = "股票切换失败，请重试";
   }
 }
 async function togglePause() {
@@ -67,6 +107,12 @@ function keys(event: KeyboardEvent) {
 onMounted(async () => {
   document.addEventListener("keydown", keys);
   try {
+    stopVisible = await listen<boolean>(
+      "status-panel-visible",
+      ({ payload }) => {
+        panelVisible.value = payload;
+      },
+    );
     let receivedActive = false;
     stopActive = await listen<number>("status-active-index", ({ payload }) => {
       receivedActive = true;
@@ -98,6 +144,7 @@ onBeforeUnmount(() => {
   disposed = true;
   stop?.();
   stopActive?.();
+  stopVisible?.();
   document.removeEventListener("keydown", keys);
 });
 </script>
@@ -114,9 +161,16 @@ onBeforeUnmount(() => {
         {{ editing ? "完成" : "编辑" }}
       </button>
     </header>
-    <p v-if="error" role="alert" class="panel-error">{{ error }}</p>
+    <p v-if="error" class="panel-error">{{ error }}</p>
+    <StatusIntradayChart
+      v-if="chartHolding"
+      :key="chartHolding.id"
+      :security="chartHolding"
+      :trades="snapshot?.trades ?? []"
+      :active="panelVisible"
+    />
     <div class="holdings-scroll">
-      <table aria-label="菜单栏持仓列表">
+      <table>
         <colgroup>
           <col style="width: 30%" />
           <col style="width: 18%" />
@@ -138,36 +192,37 @@ onBeforeUnmount(() => {
             v-for="(row, index) in snapshot?.holdings"
             :key="row.id"
             :class="{ 'is-active': activeIndex === index }"
-            :aria-current="activeIndex === index ? 'true' : undefined"
           >
             <td>
-              <strong :title="`${row.name} · ${row.id.toUpperCase()}`"
-                >{{ row.name }}<span v-if="row.stale"> *</span></strong
+              <button
+                type="button"
+                class="stock-switch"
+                :title="`切换到 ${row.name} · ${row.id.toUpperCase()}`"
+                @click="selectHolding(index)"
               >
+                <strong>{{ row.name }}<span v-if="row.stale"> *</span></strong>
+              </button>
               <small class="stock-code">{{ row.id.toUpperCase() }}</small>
               <label v-if="editing" class="alias-label"
                 >简称<input
-                  :aria-label="`${row.name}的菜单栏简称`"
+                  class="alias-input"
                   :value="drafts[row.id] ?? row.shortName"
                   @input="
                     drafts[row.id] = ($event.target as HTMLInputElement).value
                   "
-                  maxlength="12"
                   placeholder="留空恢复自动"
                   @change="alias(row.id, $event)"
               /></label>
             </td>
             <td :class="statusTone(row.change)">
               <span
-                class="profit-amount"
-                aria-label="当前股价"
+                class="profit-amount current-price"
                 :title="row.price ?? '—'"
                 >{{ row.price ?? "—" }}</span
               >
               <small
-                class="return-rate"
+                class="return-rate price-change"
                 :class="statusTone(row.change)"
-                aria-label="涨跌幅"
                 >{{ signed(row.change) }}</small
               >
             </td>
@@ -179,10 +234,9 @@ onBeforeUnmount(() => {
                 >{{ signed(row.profit, true) }}</span
               >
               <small
-                class="return-rate"
+                class="return-rate daily-return"
                 :class="statusTone(row.dailyPercent)"
                 :title="signed(row.dailyPercent)"
-                aria-label="当日收益率"
                 >{{ signed(row.dailyPercent) }}</small
               >
             </td>
@@ -194,10 +248,9 @@ onBeforeUnmount(() => {
                 >{{ signed(row.holdingProfit, true) }}</span
               >
               <small
-                class="return-rate"
+                class="return-rate holding-return"
                 :class="statusTone(row.holdingPercent)"
                 :title="signed(row.holdingPercent)"
-                aria-label="持仓收益率"
                 >{{ signed(row.holdingPercent) }}</small
               >
             </td>
@@ -209,7 +262,7 @@ onBeforeUnmount(() => {
       </p>
       <p v-if="!snapshot && !error" class="panel-empty">正在获取持仓…</p>
     </div>
-    <section v-if="snapshot" class="panel-total" aria-label="当日汇总">
+    <section v-if="snapshot" class="panel-total">
       <div>
         <strong>今日合计</strong
         ><small
@@ -298,10 +351,13 @@ body.status-panel-window {
   background: var(--hover);
   border-color: rgba(255, 255, 255, 0.4);
 }
-.status-panel button:focus-visible,
 .status-panel input:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: -2px;
+}
+.status-panel button:is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 .status-panel button:disabled {
   opacity: 0.45;
@@ -392,6 +448,24 @@ body.status-panel-window {
 .status-panel tbody tr.is-active {
   background: var(--selection);
   box-shadow: inset 2px 0 0 rgba(0, 122, 255, 0.6);
+}
+.status-panel .stock-switch,
+.status-panel .stock-switch:is(:hover, :active, :focus, :focus-visible) {
+  appearance: none;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  color: inherit;
+  text-align: left;
+}
+.status-panel .stock-switch:focus-visible strong {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .status-panel td strong {
   display: block;

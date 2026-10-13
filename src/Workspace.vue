@@ -13,6 +13,7 @@ import Decimal from "decimal.js";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import MarketChart from "./components/MarketChart.vue";
 import HistoryEditor from "./components/HistoryEditor.vue";
+import DateTimeField from "./components/DateTimeField.vue";
 import type { HistoryTarget } from "./sim/history";
 import { QuotePoller, quoteAge, type Quote } from "./quotes";
 import {
@@ -559,7 +560,7 @@ onBeforeUnmount(() => {
       ><button class="subtle" @click="tab = 'backup'">备份账户</button>
       <button class="primary" @click="modal = 'cash'">＋ 资金流水</button>
     </header>
-    <section class="account-strip" aria-label="账户账面概况">
+    <section class="account-strip">
       <div>
         <span>账面总资产</span><strong>{{ money(valuation.total) }}</strong
         ><small v-if="valuation.missing"
@@ -579,11 +580,11 @@ onBeforeUnmount(() => {
         ><small>{{ holdings.length }}只证券 · 点击自选更新报价</small>
       </div>
       <div>
-        <span>累计已实现 · FIFO</span
+        <span>累计卖出盈亏（FIFO）</span
         ><strong :class="tone(ledger.realized)">{{
           money(ledger.realized)
         }}</strong
-        ><small>卖出净额 − FIFO持仓成本</small>
+        ><small>包含部分卖出和已经清仓的交易</small>
       </div>
       <div>
         <span>持仓浮动盈亏</span
@@ -598,15 +599,10 @@ onBeforeUnmount(() => {
         ><small>含逆回购利息 {{ money(ledger.repoInterest) }}</small>
       </div>
     </section>
-    <div
-      v-if="error || message"
-      class="notice"
-      :class="{ danger: !!error }"
-      role="status"
-    >
+    <div v-if="error || message" class="notice" :class="{ danger: !!error }">
       <span>{{ error || message }}</span
       ><button
-        aria-label="关闭提示"
+        class="notice-close"
         @click="
           error = '';
           message = '';
@@ -630,14 +626,13 @@ onBeforeUnmount(() => {
           <h2>自选 / 持仓</h2>
           <button
             class="icon-button"
-            aria-label="添加证券"
+            title="添加证券"
             @click="modal = 'security'"
           >
             ＋
           </button>
         </div>
         <label class="search"
-          ><span class="sr-only">搜索自选</span
           ><input v-model="query" placeholder="搜索名称 / 代码"
         /></label>
         <div class="watch-head">
@@ -750,7 +745,8 @@ onBeforeUnmount(() => {
             ><b>{{ todayPair.unpairedBuy }} / {{ todayPair.unpairedSell }}</b>
           </div>
           <p>
-            按成交顺序配对同日买卖，费用按数量分摊。此项与FIFO已实现收益口径不同，不能相加。
+            按成交顺序配对同日买卖，费用按数量分摊。此项与按 FIFO
+            计算的卖出盈亏口径不同，不能相加。
           </p>
         </div>
       </section>
@@ -767,7 +763,10 @@ onBeforeUnmount(() => {
         </div>
         <form @submit.prevent="placeOrder">
           <label
-            >发生时间<input v-model="tradeTime" type="datetime-local" step="1"
+            >发生时间<DateTimeField
+              v-model="tradeTime"
+              mode="datetime"
+              test-id="trade-time"
           /></label>
           <div class="form-grid compact">
             <label
@@ -896,7 +895,7 @@ onBeforeUnmount(() => {
       </aside>
     </div>
     <section class="details panel">
-      <nav class="details-tabs" aria-label="账户明细">
+      <nav class="details-tabs">
         <button
           v-for="t in [
             { id: 'holdings', label: '我的持仓' },
@@ -923,7 +922,7 @@ onBeforeUnmount(() => {
               <th>做T摊薄成本</th>
               <th>最新价</th>
               <th>持仓浮动</th>
-              <th>已实现 · FIFO</th>
+              <th>历史卖出盈亏</th>
               <th></th>
             </tr>
           </thead>
@@ -1347,30 +1346,8 @@ onBeforeUnmount(() => {
       class="modal-backdrop"
       @click.self="!saving && (modal = '')"
     >
-      <section
-        class="modal"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="
-          modal === 'history'
-            ? historyTarget?.action === 'delete'
-              ? '删除历史记录'
-              : '修改历史记录'
-            : modal === 'cash'
-              ? '录入资金流水'
-              : modal === 'security'
-                ? '添加证券'
-                : modal === 'opening'
-                  ? '录入期初持仓'
-                  : '恢复账户备份'
-        "
-      >
-        <button
-          class="modal-close"
-          aria-label="关闭对话框"
-          :disabled="saving"
-          @click="modal = ''"
-        >
+      <section class="modal">
+        <button class="modal-close" :disabled="saving" @click="modal = ''">
           ×
         </button>
         <HistoryEditor
@@ -1394,10 +1371,10 @@ onBeforeUnmount(() => {
             </select></label
           >
           <label
-            >发生时间<input
+            >发生时间<DateTimeField
               v-model="cashForm.time"
-              type="datetime-local"
-              step="1"
+              mode="datetime"
+              test-id="cash-entry-time"
           /></label>
           <label
             >金额 · 元（填正数）<input
@@ -1478,10 +1455,10 @@ onBeforeUnmount(() => {
             期初日期须早于该证券首笔成交，且只录入一次；作为实物资产转入，不扣除账面现金。不要同时重复录入期初日前的历史买入。
           </p>
           <label
-            >期初日期<input
+            >期初日期<DateTimeField
               v-model="opening.time"
-              type="datetime-local"
-              step="1"
+              mode="datetime"
+              test-id="opening-time"
           /></label>
           <label
             >期初股数 / 份数（整数）<input
@@ -1519,7 +1496,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <p v-if="error" class="dialog-error" role="alert">{{ error }}</p>
+        <p v-if="error" class="dialog-error">{{ error }}</p>
       </section>
     </div>
   </main>

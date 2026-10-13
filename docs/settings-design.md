@@ -50,3 +50,9 @@ macOS 打包使用 Tauri app 构建与 ad-hoc 签名，再执行 codesign 和 DM
 - Subscription names are rejected in the MiMo editor. Switching to the MiMo provider preserves an existing official Token Plan address. Existing keys and defaults are retained unless the user explicitly changes them.
 - Verification: 452 frontend tests passed, 60 Rust tests passed (6 existing/manual tests ignored), TypeScript typecheck and production build passed. New tests cover MiMo wire parameters, thought behavior, exact-host legacy detection, model-list parsing and redirects, saved-credential boundaries, and selecting/customizing model versions.
 - Native acceptance: rebuilt and signed macOS app launched. The live settings view showed `XiaoMi-MIMO连接成功 · 实际调用 1 次` with the existing `mimo-v2.6-pro` / Token Plan configuration. The user performed the native test while taking over the UI; no additional test was sent by the agent and no saved configuration or key was changed. New DMG passed signature/checksum verification.
+
+## Corrected release baseline (2026-10-13)
+
+The original AI worktree was incorrectly forked from local main based on v0.6.0 (`12eedf2`), which had not incorporated the released v0.8.0 commit `a8b04c2` from `panel-refresh-fix` / origin/main. This produced an AI package missing recent trading, chart, status-bar, reconciliation and PnL calendar features. All source changes and user database data remained intact.
+
+Merged the complete `a8b04c2` history into this AI worktree. Conflict resolution retains unified Settings but uses the v0.8.0 QuoteDetails / chart-tabs layout. The status bar, LedgerWorkbench, PnlAnalysis, StatusPanel, QuoteDetails, tradeStages, workspace.css and analysis.css are byte-identical to v0.8.0. The original checkout and the release worktree remain untouched. Combined regression: 483 frontend tests passed; Rust suite and typecheck passed. Future packages use this merged baseline.

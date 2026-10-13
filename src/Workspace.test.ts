@@ -2,6 +2,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import Workspace from "./LedgerWorkbench.vue";
 import SecuritySearch from "./components/SecuritySearch.vue";
+import DateTimeField from "./components/DateTimeField.vue";
 import { newAccount } from "./sim/ledger";
 import {
   manualAccount,
@@ -27,6 +28,14 @@ async function start() {
 }
 const button = (text: string) =>
   wrapper.findAll("button").find((b) => b.text() === text)!;
+async function setDateTime(testId: string, value: string) {
+  const field = wrapper
+    .findAllComponents(DateTimeField)
+    .find((item) => item.props("testId") === testId);
+  if (!field) throw new Error(`找不到日期控件：${testId}`);
+  field.vm.$emit("update:modelValue", value);
+  await wrapper.vm.$nextTick();
+}
 beforeEach(() => {
   vi.clearAllMocks();
   const a = newAccount();
@@ -54,7 +63,16 @@ describe("交易台", () => {
     ] as const)
       insertRecord(
         a,
-        draftRecord(a, id, side, "10", "100", time, "", fee).entry,
+        draftRecord(
+          a,
+          id,
+          side,
+          "10",
+          "100",
+          time,
+          side === "sell" ? "用于核对阶段收益的完整备注" : "",
+          fee,
+        ).entry,
       );
     vi.mocked(loadAccount).mockResolvedValue({ account: a, revision: 4 });
     wrapper = mount(Workspace, {
@@ -69,25 +87,33 @@ describe("交易台", () => {
       global: { stubs: { MarketChart: true } },
     });
     await flushPromises();
-    const rows = () => wrapper.findAll(".ledger-history-table tbody tr");
+    const rows = () => wrapper.findAll(".trade-record-row");
     expect(rows()).toHaveLength(2);
+    expect(wrapper.findAll(".trade-stage-row")).toHaveLength(1);
+    expect(wrapper.find(".trade-history-summary").text()).toContain("总体收益");
     expect(wrapper.find("table.compact-history").exists()).toBe(true);
     expect(wrapper.findAll("col")).toHaveLength(8);
     expect(
       wrapper.findAll("col").map((col) => col.attributes("style")),
     ).toEqual([
       "width: 85px;",
+      "width: 82px;",
+      "width: 64px;",
+      "width: 64px;",
       "width: 60px;",
-      "width: 70px;",
-      "width: 70px;",
-      "width: 70px;",
-      "width: 90px;",
-      "width: 100px;",
+      "width: 78px;",
+      "width: 92px;",
       undefined,
     ]);
     expect(rows()[0].find("td:first-child > span").text()).toBe("2026-08-27");
     expect(rows()[0].find("td:first-child > small").text()).toBe("09:00:00");
-    expect(rows()[0].text()).toContain("清仓");
+    expect(rows()[0].text()).toContain("真清仓");
+    await rows()[0].find(".note-tooltip-anchor").trigger("mouseenter");
+    expect(
+      document.body.querySelector(".note-tooltip-popover")?.textContent,
+    ).toBe("用于核对阶段收益的完整备注");
+    await rows()[0].find(".note-tooltip-anchor").trigger("mouseleave");
+    expect(document.body.querySelector(".note-tooltip-popover")).toBeNull();
     expect(rows()[1].text()).toContain("买入");
     expect(wrapper.find(".record-actions").exists()).toBe(false);
     expect(wrapper.findAll("th").some((th) => th.text() === "证券")).toBe(
@@ -193,7 +219,7 @@ describe("交易台", () => {
     expect(saved.entries[0].time).toBe(a.entries[0].time);
     expect(saved.entries[0].price).toBe("9");
     expect(saved.entries[0].fees?.total).toBe("2.00");
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.find(".modal-backdrop").exists()).toBe(false);
     expect(document.querySelector(".floating-notices")?.textContent).toContain(
       "历史记录已修改",
     );
@@ -206,11 +232,14 @@ describe("交易台", () => {
     expect(wrapper.find(".history-body > fieldset").exists()).toBe(true);
     expect(wrapper.find(".history-body > .history-impact").exists()).toBe(true);
     expect(
-      wrapper.findAll('.history-time-fields input[type="datetime-local"]'),
+      wrapper.findAll(
+        '.history-time-fields [data-testid="history-record-time"]',
+      ),
     ).toHaveLength(1);
     const editor = wrapper.find(".history-editor");
     const originalTime = (
-      editor.find('input[type="datetime-local"]').element as HTMLInputElement
+      editor.find('[data-testid="history-record-time"] input')
+        .element as HTMLInputElement
     ).value;
     await editor.findAll("input")[1].setValue("9.5");
     await editor.find(".actual-fees input").setValue("1.23");
@@ -226,8 +255,10 @@ describe("交易台", () => {
       "9.5",
     );
     expect(
-      (editor.find('input[type="datetime-local"]').element as HTMLInputElement)
-        .value,
+      (
+        editor.find('[data-testid="history-record-time"] input')
+          .element as HTMLInputElement
+      ).value,
     ).toBe(originalTime);
     await button("取消").trigger("click");
     expect(saveAccount).not.toHaveBeenCalled();
@@ -282,7 +313,7 @@ describe("交易台", () => {
       await wrapper.findAll(".history-editor input")[1].setValue("9");
     await wrapper.find(".history-editor").trigger("submit");
     await flushPromises();
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+    expect(wrapper.find(".modal.history-modal").exists()).toBe(true);
     expect(document.querySelector(".floating-notices")?.textContent).toContain(
       "磁盘不可用",
     );
@@ -291,6 +322,10 @@ describe("交易台", () => {
   });
   it("资金记录可以修改类型和金额，再确认删除", async () => {
     await startHistory();
+    expect(wrapper.find(".account-strip").text()).toContain(
+      "累计卖出盈亏（FIFO）",
+    );
+    expect(wrapper.text()).toContain("历史卖出盈亏");
     await button("资金流水").trigger("click");
     expect(
       wrapper
@@ -344,7 +379,7 @@ describe("交易台", () => {
       revision: 0,
     });
     await start();
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.find(".modal-backdrop").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("初始化账户");
     expect(wrapper.find(".account-strip").text()).toContain("0.00");
   });
@@ -355,9 +390,7 @@ describe("交易台", () => {
     });
     await start();
     await button("＋ 资金流水").trigger("click");
-    await wrapper
-      .find('.modal input[type="datetime-local"]')
-      .setValue("2026-08-25T09:00:00");
+    await setDateTime("cash-entry-time", "2026-08-25T09:00:00");
     await wrapper
       .find('input[placeholder="以实际到账 / 转出金额为准"]')
       .setValue("1000");
@@ -474,16 +507,20 @@ it("历史成交按完整日期范围筛选，支持单边、叠加证券筛选�
   });
   await flushPromises();
   const rows = () => wrapper.findAll(".ledger-history-table tbody tr").length;
-  const start = wrapper.get('[aria-label="开始日期"]');
-  const end = wrapper.get('[aria-label="结束日期"]');
-  expect(start.attributes("type")).toBe("date");
-  expect(end.attributes("type")).toBe("date");
+  const start = wrapper.get('[data-testid="history-start-date"] input');
+  const end = wrapper.get('[data-testid="history-end-date"] input');
   expect(rows()).toBe(3);
-  await start.setValue("2026-08-26");
+  expect((start.element as HTMLInputElement).value).toBe("");
+  await start.trigger("focus");
+  expect((start.element as HTMLInputElement).value).toBe("");
+  expect(
+    wrapper.get(".history-filter-result button").attributes("disabled"),
+  ).toBeDefined();
+  await setDateTime("history-start-date", "2026-08-26");
   expect(rows()).toBe(2);
-  await end.setValue("2026-08-26");
+  await setDateTime("history-end-date", "2026-08-26");
   expect(rows()).toBe(1);
-  await start.setValue("");
+  await setDateTime("history-start-date", "");
   expect(rows()).toBe(2);
   wrapper.findComponent(SecuritySearch).vm.$emit(
     "select",
@@ -493,11 +530,62 @@ it("历史成交按完整日期范围筛选，支持单边、叠加证券筛选�
   expect(rows()).toBe(0);
   await wrapper.get(".history-filter-result button").trigger("click");
   expect(rows()).toBe(3);
-  await start.setValue("2026-08-27");
-  await end.setValue("2026-08-25");
+  await setDateTime("history-start-date", "2026-08-27");
+  await setDateTime("history-end-date", "2026-08-25");
   expect(rows()).toBe(0);
-  expect(wrapper.find('[role="alert"]').exists()).toBe(true);
-  await end.setValue("2099-01-01");
+  expect(wrapper.find(".history-range-error").exists()).toBe(true);
+  await setDateTime("history-end-date", "2099-01-01");
   expect(rows()).toBe(1);
   expect(saveAccount).not.toHaveBeenCalled();
+});
+
+it("历史成交可切换为合并资金流水的对账时间线并聚焦负余额区间", async () => {
+  const account = manualAccount();
+  const security = account.securities[0];
+  account.cashEntries!.push(
+    draftCash("deposit", "1000", "2026-08-25T01:00:00.000Z", "转入"),
+    draftCash("deposit", "20", "2026-08-25T03:00:00.000Z", "补足"),
+  );
+  insertRecord(
+    account,
+    draftRecord(
+      account,
+      security.id,
+      "buy",
+      "10",
+      "102",
+      "2026-08-25T02:00:00.000Z",
+      "买入",
+      { commission: "0", stamp: "0", transfer: "0" },
+    ).entry,
+  );
+  wrapper = mount(Workspace, {
+    props: {
+      embedded: true,
+      initialTab: "trades",
+      snapshot: { account, revision: 1 },
+    },
+    global: { stubs: { MarketChart: true } },
+  });
+  await flushPromises();
+  await wrapper.get(".history-mode-tabs button:nth-child(2)").trigger("click");
+  const rows = wrapper.findAll(".reconcile-table tbody tr");
+  expect(rows).toHaveLength(3);
+  expect(rows.map((row) => row.find(".reconcile-balance").text())).toEqual([
+    "1,000.00",
+    "-20.00",
+    "0.00",
+  ]);
+  expect(rows[1].classes()).toContain("reconcile-negative");
+  expect(rows[1].text()).toContain("开始为负");
+  expect(rows[2].text()).toContain("恢复为正");
+  expect(rows[1].find(".reconcile-status small").text()).toBe(
+    "节点余额 -20.00",
+  );
+  expect(rows[2].find(".reconcile-status small").text()).toBe("节点余额 0.00");
+  expect(wrapper.find(".reconcile-summary").text()).toContain("1 段");
+  expect(wrapper.find(".reconcile-summary").text()).toContain("-20.00");
+  expect(
+    wrapper.findAll(".reconcile-table .record-actions button"),
+  ).toHaveLength(3);
 });

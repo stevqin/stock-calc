@@ -141,13 +141,7 @@ onMounted(load);
     <p v-if="!rows.length" class="table-empty">
       尚无恢复点。首次保存账户后，后续写入会保留旧修订。
     </p>
-    <div
-      v-if="candidate"
-      class="desk-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="确认恢复账户"
-    >
+    <div v-if="candidate" class="desk-overlay">
       <div class="desk-dialog">
         <h2>用这个恢复点替换当前账户？</h2>
         <dl class="impact-list">

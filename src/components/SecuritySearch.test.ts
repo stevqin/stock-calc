@@ -36,11 +36,11 @@ describe("添加证券搜索交互", () => {
   it("选择证券后改词或清空会通知外层撤销旧选择", async () => {
     const input = start();
     await input.setValue("gzmt");
-    await wrapper.find('[role="option"]').trigger("click");
+    await wrapper.find(".search-candidates li").trigger("click");
     expect(wrapper.emitted("select")?.[0]).toEqual([stock]);
     await input.setValue("cyb");
     expect(wrapper.emitted("clear")).toHaveLength(1);
-    await wrapper.find('[role="option"]').trigger("click");
+    await wrapper.find(".search-candidates li").trigger("click");
     await input.setValue("");
     expect(wrapper.emitted("clear")).toHaveLength(2);
   });
@@ -48,14 +48,14 @@ describe("添加证券搜索交互", () => {
     const input = start();
     await input.setValue("gz");
     await input.setValue("gzmt");
-    expect(wrapper.find('[role="option"]').text()).toContain("贵州茅台");
+    expect(wrapper.find(".search-candidates li").text()).toContain("贵州茅台");
     await vi.advanceTimersByTimeAsync(299);
     expect(remoteSecuritySearch).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(remoteSecuritySearch).toHaveBeenCalledExactlyOnceWith("gzmt");
-    await wrapper.find('[role="option"]').trigger("click");
+    await wrapper.find(".search-candidates li").trigger("click");
     expect(wrapper.emitted("select")?.[0]).toEqual([stock]);
-    expect(wrapper.find('[role="listbox"]').exists()).toBe(false);
+    expect(wrapper.find(".search-candidates").exists()).toBe(false);
   });
   it("丢弃快速切换关键词的旧请求和旧错误", async () => {
     let finishOld!: (hits: SecurityHit[]) => void;
@@ -71,7 +71,7 @@ describe("添加证券搜索交互", () => {
     await vi.advanceTimersByTimeAsync(300);
     finishOld([stock]);
     await flushPromises();
-    expect(wrapper.findAll('[role="option"]')).toHaveLength(1);
+    expect(wrapper.findAll(".search-candidates li")).toHaveLength(1);
     expect(wrapper.text()).toContain("创业板ETF");
     expect(wrapper.text()).not.toContain("贵州茅台股票");
   });
@@ -91,9 +91,11 @@ describe("添加证券搜索交互", () => {
     const input = start();
     await input.setValue("gzmt");
     await input.trigger("keydown", { key: "ArrowDown" });
-    expect(wrapper.find('[aria-selected="true"]').text()).toContain("贵州茅台");
+    expect(wrapper.find(".search-candidates li.active").text()).toContain(
+      "贵州茅台",
+    );
     await input.trigger("keydown", { key: "Escape" });
-    expect(input.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find(".search-candidates").exists()).toBe(false);
     await input.trigger("keydown", { key: "Enter" });
     expect(wrapper.emitted("select")).toBeUndefined();
     await input.trigger("keydown", { key: "ArrowDown" });
@@ -108,7 +110,7 @@ describe("添加证券搜索交互", () => {
     expect(
       document.querySelector(".floating-notice.error")?.textContent,
     ).toContain("连接失败；请重试搜索");
-    expect(wrapper.findAll('[role="option"]')).toHaveLength(1);
+    expect(wrapper.findAll(".search-candidates li")).toHaveLength(1);
     await input.setValue("zzzxxyyqqq");
     await vi.advanceTimersByTimeAsync(300);
     expect(wrapper.text()).toContain("未找到匹配证券");
@@ -125,7 +127,7 @@ describe("添加证券搜索交互", () => {
     await input.setValue("");
     finish([stock]);
     await flushPromises();
-    expect(wrapper.find('[role="listbox"]').exists()).toBe(false);
+    expect(wrapper.find(".search-candidates").exists()).toBe(false);
     await input.setValue("cyb");
     wrapper.unmount();
     await vi.advanceTimersByTimeAsync(300);
@@ -143,7 +145,7 @@ describe("添加证券搜索交互", () => {
     await input.setValue("gzmt");
     await vi.advanceTimersByTimeAsync(500);
     expect(remoteSecuritySearch).not.toHaveBeenCalled();
-    expect(wrapper.find('[role="option"]').text()).toContain("贵州茅台");
+    expect(wrapper.find(".search-candidates li").text()).toContain("贵州茅台");
     expect(wrapper.text()).toContain("Enter 筛选");
     expect(wrapper.text()).toContain("仅搜索已有历史交易的证券");
   });

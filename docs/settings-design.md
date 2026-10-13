@@ -39,3 +39,13 @@ macOS 打包使用 Tauri app 构建与 ad-hoc 签名，再执行 codesign 和 DM
 - Release 构建完成，codesign --verify --deep --strict 通过，hdiutil verify 校验和有效。
 - 正常退出旧实例后启动新构建，实际桌面界面显示统一「设置」入口，已打开 AI 模型新增表单，新增/保存按钮可用。
 - 用户凭证由用户自行填写；未输入、读取或发送用户 API Key。
+
+## MiMo compatibility and model versions (2026-10-13)
+
+- Investigation: the saved configuration initially used `MIMO-TokenPlan` as the model ID. After changing it to `mimo-v2.6-pro`, the application returned “模型未返回可用文本”. No key was read into tool output. Configuration inspection queried only provider, base URL and model ID from the local database.
+- Xiaomi official docs: https://mimo.mi.com/docs/en-US/api/chat/openai-api and https://mimo.mi.com/docs/en-US/api/model/list-models. The Chat Completions API supports Bearer authentication, uses `max_completion_tokens`, and enables thinking by default. The former 16-token connection test could exhaust output during thinking.
+- MiMo gateway adapts output limits by provider or exact official API/Token Plan host, preserving legacy custom configurations. Connection tests use 64 tokens and disable MiMo thinking; independent analysis keeps the default thinking behavior.
+- Settings adds Xiaomi MiMo provider, text-model version presets, custom model ID input, and a native `GET /models` action using saved credentials. Credentials never cross back into the webview. Unsaved address/provider/key changes disable list retrieval until saved; changing these settings clears fetched versions. Unsupported lists retain manual entry. Presets do not imply account entitlement.
+- Model listing shares endpoint validation, origin concurrency scheduling, no-redirect client and 120-second timeout, caps JSON at 2MB and validates at most 10,000 IDs. HTTP error messages expose only status and safe guidance, not server response bodies.
+- Subscription names are rejected in the MiMo editor. Switching to the MiMo provider preserves an existing official Token Plan address. Existing keys and defaults are retained unless the user explicitly changes them.
+- Verification: 452 frontend tests passed, 60 Rust tests passed (6 existing/manual tests ignored), TypeScript typecheck and production build passed. New tests cover MiMo wire parameters, thought behavior, exact-host legacy detection, model-list parsing and redirects, saved-credential boundaries, and selecting/customizing model versions.

@@ -11,6 +11,8 @@ pub struct Message {
 pub struct CompletionRequest {
     pub messages: Vec<Message>,
     pub max_tokens: u32,
+    #[serde(default)]
+    pub disable_thinking: bool,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +55,18 @@ fn retry_delay(value: Option<&str>, now: i64) -> Duration {
         return Duration::from_secs(date.timestamp().saturating_sub(now).max(0) as u64);
     }
     Duration::from_secs(1)
+}
+fn is_mimo(config: &ModelConfig) -> bool {
+    config.provider == "xiaomi-mimo"
+        || reqwest::Url::parse(&config.base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .is_some_and(|host| {
+                matches!(
+                    host.as_str(),
+                    "api.xiaomimimo.com" | "token-plan-cn.xiaomimimo.com"
+                )
+            })
 }
 fn error(code: &str, message: &str) -> AiError {
     AiError::new(code, message)
@@ -105,6 +119,68 @@ impl Gateway {
             scheduler: Scheduler::new(),
         })
     }
+    pub async fn list_model_versions(
+        &self,
+        config: &ModelConfig,
+        secret: &str,
+    ) -> AiResult<Vec<String>> {
+        if secret.is_empty() || secret.contains(['\r', '\n']) {
+            return Err(error("invalidSecret", "密钥无效"));
+        }
+        let endpoint = normalize_endpoint(&config.base_url)?;
+        let endpoint = endpoint
+            .strip_suffix("chat/completions")
+            .unwrap()
+            .to_owned()
+            + "models";
+        let origin = reqwest::Url::parse(&endpoint)
+            .unwrap()
+            .origin()
+            .ascii_serialization();
+        let cancel = CancellationToken::new();
+        let _permit = self.scheduler.acquire(&origin, &cancel).await?;
+        let mut response = self
+            .client
+            .get(endpoint)
+            .bearer_auth(secret)
+            .send()
+            .await
+            .map_err(|_| error("connection", "获取模型列表失败，请检查地址或网络"))?;
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            return Err(error("modelListUnavailable", &format!("无法获取模型列表（HTTP {status}），接口可能不支持列表或当前密钥没有权限；可手动选择或填写模型版本")));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| error("responseRead", "模型列表读取失败"))?
+        {
+            if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
+                return Err(error("responseTooLarge", "模型列表超过2MB"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| error("protocol", "模型列表格式不兼容，请手动填写模型版本"))?;
+        let data = value
+            .get("data")
+            .and_then(|v| v.as_array())
+            .filter(|v| v.len() <= 10000)
+            .ok_or_else(|| error("protocol", "模型列表格式不兼容，请手动填写模型版本"))?;
+        let mut versions = Vec::new();
+        for item in data {
+            let id = item
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty() && v.len() <= 256 && !v.chars().any(char::is_control))
+                .ok_or_else(|| error("protocol", "模型列表包含无效标识，请手动填写模型版本"))?;
+            versions.push(id.to_owned());
+        }
+        versions.sort();
+        versions.dedup();
+        Ok(versions)
+    }
     pub async fn complete(
         &self,
         config: &ModelConfig,
@@ -129,7 +205,16 @@ impl Gateway {
             .unwrap()
             .origin()
             .ascii_serialization();
-        let payload = serde_json::json!({"model":config.model,"messages":request.messages,"max_tokens":request.max_tokens,"stream":false});
+        let mut payload =
+            serde_json::json!({"model":config.model,"messages":request.messages,"stream":false});
+        payload[if is_mimo(config) {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        }] = request.max_tokens.into();
+        if is_mimo(config) && request.disable_thinking {
+            payload["thinking"] = serde_json::json!({"type":"disabled"});
+        }
         if serde_json::to_vec(&payload)
             .map_err(|_| error("invalidRequest", "模型请求无效"))?
             .len()
@@ -210,7 +295,13 @@ impl Gateway {
                 ));
             }
             if !status.is_success() {
-                return Err(error("protocol", "模型拒绝请求，请核对兼容协议与模型标识"));
+                return Err(error(
+                    "protocol",
+                    &format!(
+                        "模型拒绝请求（HTTP {}），请核对模型版本、套餐权限和兼容参数",
+                        status.as_u16()
+                    ),
+                ));
             }
             let mut bytes = Vec::new();
             loop {
@@ -285,6 +376,7 @@ mod tests {
                 content: "连接测试".into(),
             }],
             max_tokens: 16,
+            disable_thinking: false,
         }
     }
     fn context() -> CallContext {
@@ -292,6 +384,100 @@ mod tests {
             cancel: CancellationToken::new(),
             allow_transient_retry: true,
             on_event: None,
+        }
+    }
+    #[tokio::test]
+    async fn mimo_uses_completion_tokens_and_disables_thinking_only_for_test() {
+        let (url, seen, server) = serve(vec![(
+            200,
+            r#"{"choices":[{"message":{"content":"OK"}}]}"#.into(),
+        )])
+        .await;
+        let mut c = config(url);
+        c.provider = "xiaomi-mimo".into();
+        let mut r = request();
+        r.disable_thinking = true;
+        Gateway::new()
+            .unwrap()
+            .complete(&c, "fixture-key", &r, &context())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let requests = seen.lock().unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(requests[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["max_completion_tokens"], 16);
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["thinking"]["type"], "disabled");
+    }
+    #[tokio::test]
+    async fn model_versions_use_saved_endpoint_and_bounded_parsing() {
+        let (url, seen, server) = serve(vec![(
+            200,
+            r#"{"data":[{"id":"z"},{"id":"a"},{"id":"z"}]}"#.into(),
+        )])
+        .await;
+        let versions = Gateway::new()
+            .unwrap()
+            .list_model_versions(&config(url), "fixture-key")
+            .await
+            .unwrap();
+        assert_eq!(versions, vec!["a", "z"]);
+        server.await.unwrap();
+        assert!(seen.lock().unwrap()[0].starts_with("GET /v1/models "));
+        for (status, body) in [
+            (401, "{}"),
+            (302, "{}"),
+            (200, "{}"),
+            (200, "{\"data\":[{\"id\":\"bad\\nmodel\"}]}"),
+        ] {
+            let (url, _, server) = serve(vec![(status, body.into())]).await;
+            assert!(Gateway::new()
+                .unwrap()
+                .list_model_versions(&config(url), "fixture-key")
+                .await
+                .is_err());
+            server.await.unwrap();
+        }
+    }
+    #[test]
+    fn mimo_legacy_configuration_is_detected_by_exact_host() {
+        assert!(is_mimo(&config(
+            "https://token-plan-cn.xiaomimimo.com/v1".into()
+        )));
+        assert!(is_mimo(&config("https://api.xiaomimimo.com/v1".into())));
+        assert!(!is_mimo(&config(
+            "https://api.xiaomimimo.com.example.com/v1".into()
+        )));
+    }
+    #[tokio::test]
+    async fn analysis_keeps_thinking_default_and_generic_token_parameter() {
+        for provider in ["xiaomi-mimo", "custom"] {
+            let (url, seen, server) = serve(vec![(
+                200,
+                r#"{"choices":[{"message":{"content":"OK"}}]}"#.into(),
+            )])
+            .await;
+            let mut c = config(url);
+            c.provider = provider.into();
+            Gateway::new()
+                .unwrap()
+                .complete(&c, "fixture-key", &request(), &context())
+                .await
+                .unwrap();
+            server.await.unwrap();
+            let seen = seen.lock().unwrap();
+            let body: serde_json::Value =
+                serde_json::from_str(seen[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            assert!(body.get("thinking").is_none());
+            assert_eq!(
+                body[if provider == "custom" {
+                    "max_tokens"
+                } else {
+                    "max_completion_tokens"
+                }],
+                16
+            );
         }
     }
     #[test]

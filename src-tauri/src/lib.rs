@@ -321,6 +321,7 @@ pub fn run() {
             ai::commands::ai_save_model,
             ai::commands::ai_delete_model,
             ai::commands::ai_test_model,
+            ai::commands::ai_list_model_versions,
             ai::commands::ai_get_task,
             ai::commands::ai_list_history,
             ai::commands::ai_delete_task

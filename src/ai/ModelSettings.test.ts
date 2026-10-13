@@ -38,11 +38,74 @@ function fixture() {
     deleteModel: async (id) => {
       models = models.filter((m) => m.id !== id);
     },
+    listModelVersions: async () => [],
     testModel: async (id) => ({ modelId: id, attempts: 1, usage: null }),
   };
   return { client, saves };
 }
 describe("AI model settings", () => {
+  it("selects MiMo model versions and preserves subscription address and existing key", async () => {
+    const f = fixture();
+    const w = mount(ModelSettings, { props: { client: f.client } });
+    await flushPromises();
+    await w.get('button[aria-label="编辑模型一"]').trigger("click");
+    await w
+      .get('input[aria-label="API 基础地址"]')
+      .setValue("https://token-plan-cn.xiaomimimo.com/v1");
+    await w.get('select[aria-label="服务商"]').setValue("xiaomi-mimo");
+    expect(
+      (w.get('input[aria-label="API 基础地址"]').element as HTMLInputElement)
+        .value,
+    ).toBe("https://token-plan-cn.xiaomimimo.com/v1");
+    await w.get('select[aria-label="模型版本"]').setValue("mimo-v2.6-pro");
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect((await f.client.listModels())[0]?.model).toBe("mimo-v2.6-pro");
+    expect(f.saves[0]?.secret).toBeNull();
+    expect(w.text()).toContain("Token Plan 是套餐名称");
+    w.unmount();
+  });
+  it("fetches versions for saved configuration, retains custom model input", async () => {
+    const f = fixture();
+    f.client.listModelVersions = async () => ["remote-pro", "remote-flash"];
+    const w = mount(ModelSettings, { props: { client: f.client } });
+    await flushPromises();
+    await w.get('button[aria-label="编辑模型一"]').trigger("click");
+    await w.get('button[aria-label="获取模型版本"]').trigger("click");
+    await flushPromises();
+    expect(w.get('select[aria-label="模型版本"]').text()).toContain(
+      "remote-pro",
+    );
+    await w.get('select[aria-label="模型版本"]').setValue("remote-pro");
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect((await f.client.listModels())[0]?.model).toBe("remote-pro");
+    await w.get('select[aria-label="模型版本"]').setValue("");
+    await w.get('input[aria-label="模型标识"]').setValue("private-version");
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect((await f.client.listModels())[0]?.model).toBe("private-version");
+    w.unmount();
+  });
+  it("rejects a MiMo subscription name and fetches only saved credentials", async () => {
+    const f = fixture();
+    const fetch = vi.fn(f.client.listModelVersions);
+    f.client.listModelVersions = fetch;
+    const w = mount(ModelSettings, { props: { client: f.client } });
+    await flushPromises();
+    await w.get('button[aria-label="编辑模型一"]').trigger("click");
+    await w.get('select[aria-label="服务商"]').setValue("xiaomi-mimo");
+    await w.get('input[aria-label="模型标识"]').setValue("MIMO-TokenPlan");
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(w.get('[role="alert"]').text()).toContain("套餐名称");
+    expect(f.saves).toHaveLength(0);
+    expect(
+      w.get('button[aria-label="获取模型版本"]').attributes("disabled"),
+    ).toBeDefined();
+    expect(fetch).not.toHaveBeenCalled();
+    w.unmount();
+  });
   it("creates custom configuration, masks and clears key after save", async () => {
     const f = fixture();
     const w = mount(ModelSettings, { props: { client: f.client } });

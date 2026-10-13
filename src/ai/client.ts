@@ -22,6 +22,7 @@ export interface ModelClient {
   deleteModel(id: string): Promise<void>;
   getDefaults(): Promise<ModelDefaults>;
   saveDefaults(defaults: ModelDefaults): Promise<void>;
+  listModelVersions(id: string): Promise<string[]>;
   testModel(id: string): Promise<ModelTestResult>;
 }
 export const modelClient: ModelClient = {
@@ -32,6 +33,7 @@ export const modelClient: ModelClient = {
   deleteModel: (id) => invoke("ai_delete_model", { id }),
   getDefaults: () => invoke("ai_get_defaults"),
   saveDefaults: (defaults) => invoke("ai_save_defaults", { defaults }),
+  listModelVersions: (id) => invoke("ai_list_model_versions", { id }),
   testModel: (id) => invoke("ai_test_model", { id }),
 };
 export const loadTask = (taskId: string) =>

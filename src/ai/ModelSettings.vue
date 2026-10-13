@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, reactive, ref } from "vue";
+import {
+  computed,
+  onMounted,
+  onBeforeUnmount,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import { modelClient, aiErrorMessage, type ModelClient } from "./client";
 import type { ModelConfig, ModelConfigInput, ModelDefaults } from "./types";
 import "./ai.css";
@@ -26,6 +33,55 @@ const blank = (): ModelConfigInput => ({
   enabled: true,
 });
 const form = reactive<ModelConfigInput>(blank());
+const remoteVersions = ref<string[]>([]);
+watch([() => form.baseUrl, () => form.provider], () => {
+  remoteVersions.value = [];
+});
+const isMimo = computed(
+  () =>
+    form.provider === "xiaomi-mimo" ||
+    /^https:\/\/(api|token-plan-cn)\.xiaomimimo\.com(?:\/|$)/.test(
+      form.baseUrl,
+    ),
+);
+const versions = computed(() => [
+  ...new Set([
+    ...remoteVersions.value,
+    ...(isMimo.value
+      ? [
+          "mimo-v2.6-flash",
+          "mimo-v2.6-pro",
+          "mimo-v2.6-pro-ultraspeed",
+          "mimo-v2.5-pro",
+          "mimo-v2.5",
+        ]
+      : []),
+  ]),
+]);
+const selectedVersion = computed({
+  get: () => (versions.value.includes(form.model) ? form.model : ""),
+  set: (value: string) => {
+    form.model = value;
+  },
+});
+const canFetchVersions = computed(
+  () =>
+    models.value.some(
+      (m) =>
+        m.id === form.id &&
+        m.baseUrl === form.baseUrl &&
+        m.provider === form.provider,
+    ) && !secret.value,
+);
+async function fetchVersions() {
+  if (!form.id || !canFetchVersions.value) return;
+  await run(async () => {
+    remoteVersions.value = await client.listModelVersions(form.id!);
+    notice.value = remoteVersions.value.length
+      ? `已获取 ${remoteVersions.value.length} 个模型版本，请选择适合文本分析的版本`
+      : "接口未返回模型版本，可手动填写模型标识";
+  });
+}
 const enabledModels = computed(() => models.value.filter((m) => m.enabled));
 let mounted = true;
 async function refresh() {
@@ -49,6 +105,7 @@ async function run(action: () => Promise<void>) {
   }
 }
 function edit(model?: ModelConfig) {
+  remoteVersions.value = [];
   Object.assign(form, model ?? blank());
   secret.value = "";
   editing.value = true;
@@ -56,12 +113,29 @@ function edit(model?: ModelConfig) {
   notice.value = "";
 }
 function providerChanged() {
+  remoteVersions.value = [];
   if (form.provider === "openai") form.baseUrl = "https://api.openai.com/v1";
+  if (
+    form.provider === "xiaomi-mimo" &&
+    !/^https:\/\/(api|token-plan-cn)\.xiaomimimo\.com(?:\/|$)/.test(
+      form.baseUrl,
+    )
+  ) {
+    form.baseUrl = "https://api.xiaomimimo.com/v1";
+  }
 }
 async function save() {
   await run(async () => {
     if (!form.id && form.enabled && !secret.value.trim()) {
       error.value = "启用新模型需要输入密钥";
+      return;
+    }
+    if (
+      isMimo.value &&
+      /^(mimo[-_ ]?)?token[-_ ]?plan$/i.test(form.model.trim())
+    ) {
+      error.value =
+        "Token Plan 是套餐名称，请选择具体模型版本，例如 mimo-v2.6-pro";
       return;
     }
     const saved = await client.saveModel(
@@ -207,6 +281,7 @@ onBeforeUnmount(() => {
           >
             <option value="custom">自定义 / OpenAI 兼容接口</option>
             <option value="openai">OpenAI</option>
+            <option value="xiaomi-mimo">小米 MiMo</option>
           </select></label
         >
         <label
@@ -223,6 +298,34 @@ onBeforeUnmount(() => {
           /chat/completions。更换主机时需重新输入对应密钥；本机服务可使用
           HTTP。</small
         >
+        <p v-if="isMimo" class="ai-settings-hint">
+          Token Plan 是套餐名称，不是模型版本。订阅套餐使用
+          token-plan-cn.xiaomimimo.com/v1；按量付费使用
+          api.xiaomimimo.com/v1，密钥需与地址对应。
+        </p>
+        <label
+          >模型版本<select
+            v-model="selectedVersion"
+            aria-label="模型版本"
+            :disabled="busy"
+          >
+            <option value="">自定义模型标识</option>
+            <option v-for="version in versions" :key="version" :value="version">
+              {{ version }}
+            </option>
+          </select></label
+        >
+        <button
+          type="button"
+          aria-label="获取模型版本"
+          :disabled="busy || !canFetchVersions || !client.desktop"
+          @click="fetchVersions"
+        >
+          获取模型版本
+        </button>
+        <small
+          >从已保存的地址与密钥读取模型列表，不发起文本生成。地址、服务商或密钥修改后需先保存。预设版本不代表当前套餐有调用权限。</small
+        >
         <label
           >模型标识<input
             v-model="form.model"
@@ -230,8 +333,11 @@ onBeforeUnmount(() => {
             required
             maxlength="256"
             :disabled="busy"
-            placeholder="服务商提供的模型名称"
+            placeholder="具体模型 ID，例如 mimo-v2.6-pro"
         /></label>
+        <small
+          >显示名称可自由命名；模型标识必须是服务商要求的具体版本，区分大小写。</small
+        >
         <label
           >API Key<input
             v-model="secret"

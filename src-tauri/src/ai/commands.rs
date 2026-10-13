@@ -58,6 +58,18 @@ pub fn ai_delete_model(
 ) -> AiResult<()> {
     config::delete_model(&mut *lock(&store)?, &services.secrets, &id)
 }
+#[tauri::command]
+pub async fn ai_list_model_versions(
+    store: tauri::State<'_, Store>,
+    services: tauri::State<'_, AiServices>,
+    id: String,
+) -> AiResult<Vec<String>> {
+    let (model, key) = {
+        let db = lock(&store)?;
+        config::secret_for_model(&db, &services.secrets, &id)?
+    };
+    services.gateway.list_model_versions(&model, &key).await
+}
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTestResult {
@@ -85,7 +97,8 @@ pub async fn ai_test_model(
                     role: "user".into(),
                     content: "Reply with OK to confirm this connection.".into(),
                 }],
-                max_tokens: 16,
+                max_tokens: 64,
+                disable_thinking: true,
             },
             &CallContext {
                 cancel: CancellationToken::new(),

@@ -1,7 +1,6 @@
 use super::types::*;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::json;
 
 pub fn initialize(db: &Connection) -> AiResult<()> {
     db.execute_batch(include_str!("schema.sql"))

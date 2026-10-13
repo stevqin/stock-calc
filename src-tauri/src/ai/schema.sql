@@ -13,3 +13,5 @@ CREATE TABLE IF NOT EXISTS ai_summaries(id TEXT PRIMARY KEY,task_id TEXT NOT NUL
 CREATE INDEX IF NOT EXISTS ai_reports_task ON ai_reports(task_id);
 CREATE INDEX IF NOT EXISTS ai_summaries_task ON ai_summaries(task_id);
 CREATE INDEX IF NOT EXISTS ai_tasks_status ON ai_tasks(status,seq);
+
+CREATE TABLE IF NOT EXISTS ai_credential_cleanup(reference TEXT PRIMARY KEY);

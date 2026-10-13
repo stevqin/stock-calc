@@ -272,6 +272,7 @@ pub fn run() {
         .manage(client)
         .setup(|app| {
             storage::initialize(app)?;
+            ai::commands::initialize(app)?;
             #[cfg(target_os = "macos")]
             status_bar::initialize(app)?;
             Ok(())
@@ -313,7 +314,16 @@ pub fn run() {
             storage::write_market_cache,
             storage::clear_market_cache,
             storage::load_drafts,
-            storage::save_drafts
+            storage::save_drafts,
+            ai::commands::ai_list_models,
+            ai::commands::ai_get_defaults,
+            ai::commands::ai_save_defaults,
+            ai::commands::ai_save_model,
+            ai::commands::ai_delete_model,
+            ai::commands::ai_test_model,
+            ai::commands::ai_get_task,
+            ai::commands::ai_list_history,
+            ai::commands::ai_delete_task
         ])
         .run(tauri::generate_context!())
         .expect("desktop runtime");

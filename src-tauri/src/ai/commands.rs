@@ -89,6 +89,7 @@ pub async fn ai_test_model(
             },
             &CallContext {
                 cancel: CancellationToken::new(),
+                allow_transient_retry: true,
                 on_event: None,
             },
         )

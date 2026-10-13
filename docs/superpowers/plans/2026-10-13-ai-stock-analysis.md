@@ -10,7 +10,7 @@
 
 **Spec:** [已确认设计](../specs/2026-10-13-ai-stock-analysis-design.md)。执行前必须同时阅读设计与本计划。
 
-状态：用户已确认并选择当前会话直接实施；任务 1 已完成来源验证，新闻范围调整已于 2026-10-13 确认，正在推进阶段 B。
+状态：用户已确认并选择当前会话直接实施；任务 1 已完成来源验证，新闻范围调整已于 2026-10-13 确认，阶段 B 已完成；模型设置界面已提前接入，AnalysisSetup 与后续分析流程尚未实施。
 
 ## Global Constraints
 
@@ -96,21 +96,21 @@ IPC 命令：`ai_list_models`、`ai_save_model`（input、可选 replacementSecr
 
 **Interfaces:** `repository::initialize(&Connection) -> Result<(), AiError>`；`create_task(&mut Connection, &StartRequest) -> Result<TaskDetail, AiError>`；`save_snapshot(&mut Connection, task_id: &str, &Snapshot)`、`save_report(...)`、`append_summary(...)`、`get_task(&Connection, task_id: &str)`、`list_history(&Connection, &HistoryQuery)`、`delete_task(&mut Connection, task_id: &str)` 均返回对应 DTO 或 `Result<(), AiError>`。后续任务通过仓储追加记录，不覆盖已存在版本。
 
-- [ ] 写测试 `migration_preserves_account_and_history`、`duplicate_request_returns_same_task`、`summary_versions_are_append_only`、`delete_keeps_shared_evidence`：迁移前后原账户与历史不变；相同 requestId 只有一个任务；版本 1、2 都能读；有引用证据不删除。契约 fixture 包含空列表、可空时间、stock/etf 和全部状态枚举。
-- [ ] 运行 `cargo test --manifest-path src-tauri/Cargo.toml ai::repository` 与 `npm test -- src/ai/types.test.ts`，确认新功能断言失败。
-- [ ] 实现独立 AI 表、索引和事务；首版必要快照均存 SQLite JSON，避免外置文件一致性复杂度。锁只覆盖短事务，网络请求期间不持有数据库 Mutex；账号备份格式不暗中改变。
-- [ ] 重跑上述命令至通过；提交 `feat: add AI report contracts and local repository`。
+- [x] 写测试 `migration_preserves_account_and_history`、`duplicate_request_returns_same_task`、`summary_versions_are_append_only`、`delete_keeps_shared_evidence`：迁移前后原账户与历史不变；相同 requestId 只有一个任务；版本 1、2 都能读；有引用证据不删除。契约 fixture 包含空列表、可空时间、stock/etf 和全部状态枚举。
+- [x] 运行 `cargo test --manifest-path src-tauri/Cargo.toml ai::repository` 与 `npm test -- src/ai/types.test.ts`，确认新功能断言失败。
+- [x] 实现独立 AI 表、索引和事务；首版必要快照均存 SQLite JSON，避免外置文件一致性复杂度。锁只覆盖短事务，网络请求期间不持有数据库 Mutex；账号备份格式不暗中改变。
+- [x] 重跑上述命令至通过；提交 `feat: add AI report contracts and local repository`。
 
 ## Task 3：安全密钥与模型网关（阶段 B）
 
 **Files:** 创建 `ai/credentials.rs`、`gateway.rs`、`scheduler.rs`；修改 `ai/mod.rs`、`lib.rs`、`Cargo.toml`、`Cargo.lock`。
 
-**Interfaces:** `SecretStore` 提供 `set/get/delete(config_id, secret)` 的 Result 方法；`gateway::normalize_endpoint(base_url: &str) -> Result<String, AiError>`；`complete(config: &ModelConfig, request: &CompletionRequest, context: &CallContext) -> Result<CompletionResponse, AiError>`。`CompletionRequest` 包含 messages 和输出 token 上限，响应包含原文和可选 usage；`CallContext` 携带 taskId、callId、取消信号及重试分类。`scheduler::acquire(normalized_origin, cancel)` 返回可释放并发许可。
+**Interfaces:** `SecretStore` 提供 `set/get/delete(config_id, secret)` 的 Result 方法；`gateway::normalize_endpoint(base_url: &str) -> Result<String, AiError>`；`Gateway::complete(&self, config: &ModelConfig, secret: &str, request: &CompletionRequest, context: &CallContext) -> Result<CompletionResponse, AiError>`。`CompletionRequest` 包含 messages 和输出 token 上限，响应包含原文和可选 usage；`CallContext` 携带取消信号、allow_transient_retry 开关和可选 on_event 阶段记录回调；taskId/callId 在任务 7 由回调闭包绑定并持久化。`scheduler::acquire(normalized_origin, cancel)` 返回可释放并发许可。
 
-- [ ] 写 `credentials_never_enter_sqlite_or_errors`、`endpoint_preserves_v1_and_rejects_query_or_credentials`、`cross_host_redirect_is_rejected`、`limits_global_3_origin_2`、`timeout_120s_and_retry_once`。断言 URL 用户信息/查询/fragment 被拒绝、尾斜杠正常、非回环 HTTP 拒绝；鉴权不重试、取消可中止等待、permit 最终释放。
-- [ ] 运行 `cargo test --manifest-path src-tauri/Cargo.toml ai::gateway`、`ai::credentials`、`ai::scheduler` 对应过滤命令，确认失败。
-- [ ] 用系统密钥库实现 macOS/Windows 存储，用测试替身隔离真实凭证；网关独立 reqwest client 默认禁止重定向，设 120 秒超时。队列采用可取消信号与 Tokio 信号量；补齐必要依赖。单次逻辑请求总发送最多 3 次：原始请求、一次瞬时错误重试、一次格式修复；修复不再重试。地址容量按 scheme/host/port 归一，不通过路径绕过限制。
-- [ ] 添加配置 CRUD、默认选择和连接测试命令；密钥写入失败不能留下可用配置假象，配置删除时避免破坏运行中模型快照。重跑过滤测试通过；提交 `feat: add secure compatible model gateway`。
+- [x] 写 `credentials_never_enter_sqlite_or_errors`、`endpoint_preserves_v1_and_rejects_query_or_credentials`、`cross_host_redirect_is_rejected`、`limits_global_3_origin_2`、`timeout_120s_and_retry_once`。断言 URL 用户信息/查询/fragment 被拒绝、尾斜杠正常、非回环 HTTP 拒绝；鉴权不重试、取消可中止等待、permit 最终释放。
+- [x] 运行 `cargo test --manifest-path src-tauri/Cargo.toml ai::gateway`、`ai::credentials`、`ai::scheduler` 对应过滤命令，确认失败。
+- [x] 用系统密钥库实现 macOS/Windows 存储，用测试替身隔离真实凭证；网关独立 reqwest client 默认禁止重定向，设 120 秒超时。队列采用可取消信号与 Tokio 信号量；补齐必要依赖。单次逻辑请求总发送最多 3 次：原始请求、一次瞬时错误重试、一次格式修复；修复不再重试。地址容量按 scheme/host/port 归一，不通过路径绕过限制。
+- [x] 添加配置 CRUD、默认选择和连接测试命令；密钥写入失败不能留下可用配置假象，配置删除时避免破坏运行中模型快照。重跑过滤测试通过；提交 `feat: add secure compatible model gateway`。
 
 ## Task 4：公开资料适配器与冻结证据（阶段 C）
 
@@ -158,6 +158,8 @@ IPC 命令：`ai_list_models`、`ai_save_model`（input、可选 replacementSecr
 - [ ] 在应用启动将遗留活跃任务改为中断；注册 IPC，返回脱敏错误；存储/网关交互不持锁跨 await。重跑通过；提交 `feat: orchestrate durable cancellable stock analysis tasks`。
 
 ## Task 8：模型设置与分析前配置（阶段 E）
+
+当前进度：ModelSettings 和主工作区入口已完成并验证；AnalysisSetup 仍待任务 7 后实施。模型设置提前交付不表示任务 8 整体完成。
 
 **Files:** 创建 `src/ai/ModelSettings.vue`、`AnalysisSetup.vue`、对应 `.test.ts`、`ai.css`；修改 `TradingDesk.vue` 加「AI 设置」入口，接入 `client.ts`。
 

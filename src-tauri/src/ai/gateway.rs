@@ -26,6 +26,7 @@ pub enum CallEvent {
 }
 pub struct CallContext {
     pub cancel: CancellationToken,
+    pub allow_transient_retry: bool,
     pub on_event: Option<std::sync::Arc<dyn Fn(CallEvent) -> AiResult<()> + Send + Sync>>,
 }
 impl CallContext {
@@ -146,7 +147,10 @@ impl Gateway {
                 Ok(r) => r,
                 Err(e) => {
                     drop(permit);
-                    if attempts == 1 && (e.is_connect() || e.is_timeout()) {
+                    if attempts == 1
+                        && context.allow_transient_retry
+                        && (e.is_connect() || e.is_timeout())
+                    {
                         tokio::select! {_=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),_=tokio::time::sleep(Duration::from_secs(1))=>{}}
                         continue;
                     }
@@ -177,7 +181,7 @@ impl Gateway {
                     chrono::Utc::now().timestamp(),
                 );
                 drop(permit);
-                if attempts == 1 {
+                if attempts == 1 && context.allow_transient_retry {
                     if delay > Duration::from_secs(120) {
                         let mut err = error("serviceUnavailable", "服务商要求较长等待，请稍后重试");
                         err.retryable = true;
@@ -215,7 +219,7 @@ impl Gateway {
                     Ok(chunk) => chunk,
                     Err(e) => {
                         drop(permit);
-                        if e.is_timeout() && attempts == 1 {
+                        if e.is_timeout() && attempts == 1 && context.allow_transient_retry {
                             tokio::select! {_=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),_=tokio::time::sleep(Duration::from_secs(1))=>{}}
                             continue 'attempt;
                         }
@@ -286,6 +290,7 @@ mod tests {
     fn context() -> CallContext {
         CallContext {
             cancel: CancellationToken::new(),
+            allow_transient_retry: true,
             on_event: None,
         }
     }
@@ -470,6 +475,7 @@ mod tests {
         let event = headers.clone();
         let ctx = CallContext {
             cancel: CancellationToken::new(),
+            allow_transient_retry: true,
             on_event: Some(Arc::new(move |e| {
                 if matches!(e, CallEvent::HeadersReceived(_)) {
                     event.notify_one();
@@ -498,5 +504,20 @@ mod tests {
         assert!(err.retryable);
         assert_eq!(count.load(Ordering::SeqCst), 2);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn format_repair_call_does_not_retry_transient_failure() {
+        let (url, seen, server) = serve(vec![(503, "{}".into())]).await;
+        let mut ctx = context();
+        ctx.allow_transient_retry = false;
+        let err = Gateway::new()
+            .unwrap()
+            .complete(&config(url), "key", &request(), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "serviceUnavailable");
+        server.await.unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 }

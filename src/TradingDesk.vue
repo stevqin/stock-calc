@@ -9,6 +9,7 @@ import {
   nextTick,
 } from "vue";
 import Decimal from "decimal.js";
+import { version as appVersion } from "../package.json";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { statusBarFrames, shortNames, type StatusSnapshot } from "./statusBar";
@@ -24,7 +25,7 @@ import MarketChart from "./components/MarketChart.vue";
 import LedgerWorkbench from "./LedgerWorkbench.vue";
 import RecoveryCenter from "./components/RecoveryCenter.vue";
 import PnlAnalysis from "./PnlAnalysis.vue";
-import ModelSettings from "./ai/ModelSettings.vue";
+import SettingsHub from "./components/SettingsHub.vue";
 import { clearAnalysisHistory } from "./analysisHistory";
 import { manualAccount, upgradeAccount } from "./sim/record";
 import { replay, validateAccount, validateSecurity } from "./sim/ledger";
@@ -1136,8 +1137,7 @@ onBeforeUnmount(() => {
             { id: 'trades', name: '历史成交' },
             { id: 'analysis', name: '盈亏分析' },
             { id: 'cash', name: '资金流水' },
-            { id: 'fees', name: '费用设置' },
-            { id: 'aiSettings', name: 'AI 设置' },
+            { id: 'settings', name: '设置' },
             { id: 'backup', name: '备份恢复' },
           ]"
           :key="p.id"
@@ -1152,7 +1152,11 @@ onBeforeUnmount(() => {
         >{{ isTauri() ? "本机账本" : "浏览器预览" }} · 不连接券商账户</span
       >
     </header>
-    <section class="desk-summary" aria-label="账户摘要">
+    <section
+      v-if="page !== 'settings'"
+      class="desk-summary"
+      aria-label="账户摘要"
+    >
       <div>
         <div class="summary-label">
           <span>账面总资产</span>
@@ -1526,7 +1530,7 @@ onBeforeUnmount(() => {
                   :mode="detailMode"
                   hide-hero
                 >
-                  <template #chart="{ setChipVisible }">
+                  <template #toolbar>
                     <div class="segmented">
                       <button
                         v-for="m in detailModes"
@@ -1537,6 +1541,8 @@ onBeforeUnmount(() => {
                         {{ m.name }}
                       </button>
                     </div>
+                  </template>
+                  <template #chart="{ setChipVisible }">
                     <div class="drawer-chart">
                       <MarketChart
                         :security="security"
@@ -1661,9 +1667,12 @@ onBeforeUnmount(() => {
         </Transition>
       </div>
     </section>
-    <section v-else-if="page === 'aiSettings'" class="desk-page">
-      <ModelSettings />
-    </section>
+    <SettingsHub
+      v-else-if="page === 'settings'"
+      :snapshot="snapshot"
+      :symbol="selected"
+      @saved="saved"
+    />
     <section v-else-if="page === 'analysis'" class="desk-page">
       <PnlAnalysis :account="account" />
     </section>
@@ -1708,7 +1717,7 @@ onBeforeUnmount(() => {
       />
     </section>
     <footer class="desk-footer">
-      <span>T刻 0.4 · 手工证券账本</span
+      <span>T刻 {{ appVersion }} · 手工证券账本</span
       ><span>仅本机保存 · 费用以交割单为准 · 行情不保证成交</span
       ><span v-if="saving">正在保存…</span>
     </footer>

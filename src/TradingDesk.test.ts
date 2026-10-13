@@ -959,8 +959,36 @@ describe("重构工作台集成", () => {
     expect(stored.cashEntries![0].amount).toBe("124");
     expect(wrapper.find(".desk-summary").text()).toContain("124.00");
   });
+  it("AI与费用归入设置，切换分类保留草稿且保存费率仍同步到账本", async () => {
+    await start();
+    const top = wrapper.findAll(".desk-header nav button").map((b) => b.text());
+    expect(top).toContain("设置");
+    expect(top).not.toContain("AI 设置");
+    expect(top).not.toContain("费用设置");
+    await button("设置").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".settings-hub").exists()).toBe(true);
+    expect(wrapper.find(".desk-summary").exists()).toBe(false);
+    expect(wrapper.find(".ai-settings").exists()).toBe(true);
+    await button("费用设置").trigger("click");
+    await flushPromises();
+    const commission = wrapper.findAll(".fee-settings input")[0];
+    await commission.setValue("1.8");
+    await button("AI 模型").trigger("click");
+    await button("费用设置").trigger("click");
+    await flushPromises();
+    expect(
+      (wrapper.findAll(".fee-settings input")[0].element as HTMLInputElement)
+        .value,
+    ).toBe("1.8");
+    await wrapper.findAll(".fee-settings form")[0].trigger("submit");
+    await flushPromises();
+    expect(stored.profiles.stock.commissionWan).toBe("1.8");
+    expect(stored.feeConfirmed.stock).toBe(true);
+  });
   it("费率保存失败时保留表单并显示错误", async () => {
     await start();
+    await button("设置").trigger("click");
     await button("费用设置").trigger("click");
     await flushPromises();
     vi.mocked(saveAccount).mockRejectedValue(new Error("磁盘不可用"));

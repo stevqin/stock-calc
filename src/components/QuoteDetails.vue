@@ -205,6 +205,9 @@ function tone(field: QuoteField): string {
           'quote-market-wide': mode === 'daily' || mode === 'five-day',
         }"
       >
+        <div v-if="$slots.toolbar" class="quote-chart-toolbar">
+          <slot name="toolbar" />
+        </div>
         <div class="quote-chart-main">
           <slot name="chart" :set-chip-visible="setChipVisible" />
         </div>
@@ -445,7 +448,10 @@ summary span {
 .quote-market-view.quote-market-wide {
   grid-template-columns: minmax(0, 1fr);
 }
-.quote-chart-main :deep(.segmented) {
+.quote-chart-toolbar {
+  grid-column: 1 / -1;
+}
+.quote-chart-toolbar :deep(.segmented) {
   margin-top: 0;
   margin-bottom: 4px;
 }

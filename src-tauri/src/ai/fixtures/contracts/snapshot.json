@@ -1,0 +1,38 @@
+{
+  "id": "snapshot-1",
+  "security": {
+    "id": "sh600519",
+    "market": "sh",
+    "code": "600519",
+    "name": "测试证券",
+    "asset": "stock"
+  },
+  "cutoffAt": "2026-10-13T10:30:00+08:00",
+  "frozenAt": "2026-10-13T10:30:10+08:00",
+  "referencePrice": "123.45",
+  "windows": {},
+  "series": {},
+  "indicators": {},
+  "evidence": [
+    {
+      "id": "evidence-1",
+      "securityId": "sh600519",
+      "kind": "userProvided",
+      "source": "用户补充",
+      "url": null,
+      "publishedAt": null,
+      "timePrecision": "unknown",
+      "eventAt": null,
+      "collectedAt": "2026-10-13T10:30:00+08:00",
+      "content": "模拟分析资料",
+      "contentHash": "fixture-hash",
+      "availability": "excerpt"
+    }
+  ],
+  "sourceStates": {
+    "news": "linksOnly"
+  },
+  "ruleVersions": {
+    "schema": 1
+  }
+}

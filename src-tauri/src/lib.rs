@@ -1,3 +1,4 @@
+mod ai;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 mod charts;
@@ -344,7 +345,9 @@ mod tests {
         let (wire, _, _) = encoding_rs::GBK.encode(&text);
         let q = parse_quote(&wire, "sh", "600519").unwrap();
         let value = serde_json::to_value(q).unwrap();
-        let fields = value["rawFields"].as_array().expect("all source fields retained");
+        let fields = value["rawFields"]
+            .as_array()
+            .expect("all source fields retained");
         assert_eq!(fields.len(), 66);
         assert_eq!(fields[1], "股票");
         assert_eq!(fields[63], "future-value");

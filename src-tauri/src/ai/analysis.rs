@@ -25,6 +25,161 @@ fn text(v: &Value, key: &str, max: usize) -> AiResult<()> {
     }
     Ok(())
 }
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PositionContext {
+    security_id: String,
+    as_of: String,
+    quantity: String,
+    available: String,
+    cost: String,
+    average_cost: Option<String>,
+    net_investment: String,
+    diluted_cost: Option<String>,
+    settlement: String,
+    round_start: String,
+    fee_confirmed: bool,
+    fee_profile: Value,
+    trades: Vec<PositionTrade>,
+}
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PositionTrade {
+    id: String,
+    security_id: String,
+    kind: String,
+    quantity: String,
+    price: String,
+    time: String,
+    date: String,
+    note: String,
+    fees: Option<Value>,
+    fee_source: String,
+}
+fn allowed_keys(v: &Value, keys: &[&str]) -> AiResult<()> {
+    if !v
+        .as_object()
+        .is_some_and(|o| o.keys().all(|k| keys.contains(&k.as_str())))
+    {
+        return Err(invalid("持仓资料包含未允许的字段"));
+    }
+    Ok(())
+}
+fn numeric(v: &str, positive: bool) -> AiResult<f64> {
+    let n = v.parse::<f64>().map_err(|_| invalid("持仓数值无效"))?;
+    if v.len() > 40 || !n.is_finite() || (positive && n < 0.) {
+        return Err(invalid("持仓数值无效"));
+    }
+    Ok(n)
+}
+fn validate_position(p: &PositionContext, security: &SecurityRef) -> AiResult<()> {
+    if p.security_id != security.id
+        || p.trades.is_empty()
+        || serde_json::to_vec(p).unwrap().len() > 256000
+    {
+        return Err(invalid(
+            "持仓资料证券不匹配、记录缺失或超过256KB，请缩减备注后重试",
+        ));
+    }
+    let q = numeric(&p.quantity, true)?;
+    let available = numeric(&p.available, true)?;
+    if q <= 0.
+        || q.fract() != 0.
+        || available > q
+        || available.fract() != 0.
+        || !["T+0", "T+1", "unconfirmed"].contains(&p.settlement.as_str())
+    {
+        return Err(invalid("持仓数量、可卖数量或交易制度无效"));
+    }
+    let cutoff =
+        chrono::DateTime::parse_from_rfc3339(&p.as_of).map_err(|_| invalid("持仓截止时间无效"))?;
+    if cutoff > chrono::Utc::now() {
+        return Err(invalid("持仓截止时间不能晚于当前时间"));
+    }
+    numeric(&p.cost, true)?;
+    numeric(&p.net_investment, false)?;
+    for v in [&p.average_cost, &p.diluted_cost].into_iter().flatten() {
+        numeric(v, false)?;
+    }
+    allowed_keys(
+        &p.fee_profile,
+        &[
+            "commissionWan",
+            "minimum",
+            "stampPercent",
+            "transferPercent",
+        ],
+    )?;
+    for v in p.fee_profile.as_object().unwrap().values() {
+        let value = v.as_str().ok_or_else(|| invalid("费用配置无效"))?;
+        if p.fee_confirmed || !value.is_empty() {
+            numeric(value, true)?;
+        }
+    }
+    for t in &p.trades {
+        if t.security_id != security.id
+            || !["opening", "buy", "sell"].contains(&t.kind.as_str())
+            || t.note.len() > 16000
+            || t.id.len() > 100
+            || t.date.len() != 10
+        {
+            return Err(invalid("本轮交易资料无效或包含其他证券"));
+        }
+        let time =
+            chrono::DateTime::parse_from_rfc3339(&t.time).map_err(|_| invalid("交易时间无效"))?;
+        if time > cutoff {
+            return Err(invalid("交易记录晚于持仓截止时间"));
+        }
+        numeric(&t.quantity, true)?;
+        numeric(&t.price, true)?;
+        if let Some(f) = &t.fees {
+            allowed_keys(
+                f,
+                &["amount", "commission", "transfer", "stamp", "total", "cash"],
+            )?;
+            for (field, v) in f.as_object().unwrap() {
+                numeric(
+                    v.as_str().ok_or_else(|| invalid("交易费用无效"))?,
+                    field != "cash",
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+fn validate_strategies(body: &Value, snapshot: &Snapshot) -> AiResult<()> {
+    let Some(position) = snapshot.evidence.iter().find(|e| e.kind == "position") else {
+        return Ok(());
+    };
+    validate_strategy_claims(body, &position.id)
+}
+fn validate_strategy_claims(body: &Value, position_id: &str) -> AiResult<()> {
+    let strategies = ["conservative", "intraday", "swing"];
+    let claims = body["claims"]
+        .as_array()
+        .ok_or_else(|| invalid("持仓报告缺少操作建议"))?;
+    for strategy in strategies {
+        if !claims.iter().any(|c| c["strategy"] == strategy) {
+            return Err(invalid("持仓报告缺少三种操作方向"));
+        }
+    }
+    for c in claims
+        .iter()
+        .filter(|c| strategies.contains(&c["strategy"].as_str().unwrap_or("")))
+    {
+        for key in ["trigger", "invalidation", "quantityBasis", "feeImpact"] {
+            text(c, key, 6000)?;
+        }
+        if !c["evidenceIds"]
+            .as_array()
+            .is_some_and(|ids| ids.iter().any(|v| v == position_id))
+        {
+            return Err(invalid("操作建议必须引用本股持仓资料"));
+        }
+    }
+    Ok(())
+}
+
 fn trading(d: chrono::NaiveDate) -> AiResult<bool> {
     let c: Value =
         serde_json::from_str(include_str!("fixtures/sources/calendar-2026.json")).unwrap();
@@ -162,6 +317,39 @@ fn validate_summary(raw: &str, reports: &[IndependentReport]) -> AiResult<Value>
             }
         }
     }
+    let strategies = ["conservative", "intraday", "swing"];
+    let has_strategies = reports.iter().any(|r| {
+        r.claims.as_array().is_some_and(|cs| {
+            cs.iter()
+                .any(|c| strategies.contains(&c["strategy"].as_str().unwrap_or("")))
+        })
+    });
+    if has_strategies {
+        for strategy in strategies {
+            if !claims.iter().any(|c| c["strategy"] == strategy) {
+                return Err(invalid("汇总缺少三种操作方向"));
+            }
+        }
+        for claim in claims
+            .iter()
+            .filter(|c| strategies.contains(&c["strategy"].as_str().unwrap_or("")))
+        {
+            let strategy = claim["strategy"].as_str().unwrap();
+            for reference in claim["supports"].as_array().unwrap() {
+                if !reports.iter().any(|r| {
+                    r.id == reference["reportId"]
+                        && r.claims.as_array().is_some_and(|cs| {
+                            cs.iter().any(|c| {
+                                c["id"] == reference["claimId"] && c["strategy"] == strategy
+                            })
+                        })
+                }) {
+                    return Err(invalid("汇总操作建议引用了其他策略的依据"));
+                }
+            }
+        }
+    }
+
     if !body["disagreements"].as_array().is_some_and(|v| {
         v.len() <= 20
             && v.iter()
@@ -287,7 +475,84 @@ fn quote_current(value: &str, now: chrono::DateTime<chrono::FixedOffset>) -> boo
         (0..=600).contains(&age)
     }
 }
-async fn collect(s: &SecurityRef, manual: &str) -> AiResult<Snapshot> {
+type SourceReporter = std::sync::Arc<dyn Fn(&str, &str, &str, &str) -> AiResult<()> + Send + Sync>;
+fn source_event(
+    reporter: &Option<SourceReporter>,
+    stage: &str,
+    state: &str,
+    label: &str,
+    detail: &str,
+) -> AiResult<()> {
+    if let Some(reporter) = reporter {
+        reporter(stage, state, label, detail)?;
+    }
+    Ok(())
+}
+async fn traced_source<T>(
+    reporter: &Option<SourceReporter>,
+    stage: &str,
+    label: &str,
+    future: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    source_event(reporter, stage, "running", label, "请求公开数据源")
+        .map_err(|_| "无法保存执行进度")?;
+    let result = future.await;
+    let (state, detail) = match &result {
+        Ok(_) => ("done", "数据源响应及字段校验完成"),
+        Err(e) => ("warning", e.as_str()),
+    };
+    source_event(reporter, stage, state, label, detail).map_err(|_| "无法保存执行进度")?;
+    result
+}
+fn persist_event(
+    db: &rusqlite::Connection,
+    task_id: &str,
+    stage: &str,
+    state: &str,
+    label: &str,
+    detail: &str,
+) -> AiResult<()> {
+    let task = repository::get_task(db, task_id)?;
+    let mut progress = task.progress;
+    if !progress.is_object() {
+        return Err(AiError::storage());
+    }
+    if progress.get("events").is_none() {
+        progress["events"] = json!([]);
+    }
+    let events = progress["events"]
+        .as_array_mut()
+        .ok_or_else(AiError::storage)?;
+    events.push(json!({"stage":stage,"state":state,"label":label,"detail":detail.chars().take(1000).collect::<String>(),"at":chrono::Utc::now().to_rfc3339()}));
+    if events.len() > 1000 {
+        events.drain(..events.len() - 1000);
+        progress["eventsTruncated"] = json!(true);
+    }
+    db.execute(
+        "UPDATE ai_tasks SET progress=?1 WHERE id=?2",
+        rusqlite::params![progress.to_string(), task_id],
+    )
+    .map_err(|_| AiError::storage())?;
+    Ok(())
+}
+fn progress_event(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    stage: &str,
+    state: &str,
+    label: &str,
+    detail: &str,
+) -> AiResult<()> {
+    let store = app.state::<Store>();
+    let db = store.0.lock().map_err(|_| AiError::storage())?;
+    persist_event(&db, task_id, stage, state, label, detail)
+}
+async fn collect(
+    s: &SecurityRef,
+    manual: &str,
+    reporter: Option<SourceReporter>,
+    position: Option<PositionContext>,
+) -> AiResult<Snapshot> {
     repository::validate_security(s)?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(18))
@@ -295,6 +560,13 @@ async fn collect(s: &SecurityRef, manual: &str) -> AiResult<Snapshot> {
         .user_agent("TCalculator AI Sources")
         .build()
         .map_err(|_| invalid("无法初始化公开数据连接"))?;
+    source_event(
+        &reporter,
+        "quote",
+        "running",
+        "工具 · 获取最新报价",
+        "腾讯公开行情",
+    )?;
     let response = client
         .get(format!("https://qt.gtimg.cn/q={}", s.id))
         .send()
@@ -305,6 +577,13 @@ async fn collect(s: &SecurityRef, manual: &str) -> AiResult<Snapshot> {
         .map_err(|_| invalid("行情读取失败"))?;
     let q = crate::parse_quote(&raw, &s.market, &s.code)
         .map_err(|_| invalid("行情身份或字段校验失败"))?;
+    source_event(
+        &reporter,
+        "quote",
+        "done",
+        "工具 · 获取最新报价",
+        "证券身份与报价字段已核验",
+    )?;
     let reference = q.latest.clone();
     let quote = serde_json::to_value(q).map_err(|_| invalid("行情序列化失败"))?;
     let symbols = vec![crate::Symbol {
@@ -312,12 +591,50 @@ async fn collect(s: &SecurityRef, manual: &str) -> AiResult<Snapshot> {
         code: s.code.clone(),
     }];
     let (daily, intraday, flow, ann) = tokio::join!(
-        crate::charts::request_chart(&client, &s.market, &s.code, "daily-raw"),
-        crate::charts::request_chart(&client, &s.market, &s.code, "intraday"),
-        crate::fund_flows::request(&client, &symbols),
-        announcements(&client, s)
+        traced_source(
+            &reporter,
+            "daily",
+            "工具 · 获取不复权日线",
+            crate::charts::request_chart(&client, &s.market, &s.code, "daily-raw")
+        ),
+        traced_source(
+            &reporter,
+            "intraday",
+            "工具 · 获取当日分时",
+            crate::charts::request_chart(&client, &s.market, &s.code, "intraday")
+        ),
+        traced_source(
+            &reporter,
+            "fundFlow",
+            "工具 · 获取主力资金流",
+            crate::fund_flows::request(&client, &symbols)
+        ),
+        traced_source(
+            &reporter,
+            "announcements",
+            "工具 · 获取公告列表",
+            announcements(&client, s)
+        )
     );
     let mut ev = vec![];
+    if let Some(p) = position {
+        validate_position(&p, s)?;
+        ev.push(evidence(
+            s,
+            "position",
+            "本机账本（用户记录，未经券商核验）",
+            serde_json::to_string(&p).unwrap(),
+            None,
+            "userProvided",
+        ));
+        source_event(
+            &reporter,
+            "position",
+            "done",
+            "持仓资料冻结",
+            "已纳入本股当前持仓及本轮交易记录，三种策略使用同一份资料",
+        )?;
+    }
     let mut states =
         json!({"quote":"available","news":"sourceLinksOnly","announcements":"titleOnly"});
     let mut quote = quote;
@@ -414,6 +731,14 @@ async fn collect(s: &SecurityRef, manual: &str) -> AiResult<Snapshot> {
     states["quoteIsCurrent"] = json!(quote_current(quote_time, local));
     states["quoteDateMatchesToday"] =
         json!(quote_time.starts_with(&local.format("%Y%m%d").to_string()));
+    let forecast_windows = windows(local)?;
+    source_event(
+        &reporter,
+        "materials",
+        "done",
+        "资料与时间窗口校验",
+        "新闻为来源链接；公告未读取正文。已核对报价时效、资金流日期与交易日历。缺失资料保持标注。",
+    )?;
     let frozen = now.to_rfc3339();
     Ok(Snapshot {
         id: id(),
@@ -421,7 +746,7 @@ async fn collect(s: &SecurityRef, manual: &str) -> AiResult<Snapshot> {
         cutoff_at: frozen.clone(),
         frozen_at: frozen,
         reference_price: Some(reference),
-        windows: windows(local)?,
+        windows: forecast_windows,
         series,
         indicators: quote,
         evidence: ev,
@@ -473,6 +798,7 @@ fn context(
     let task_id = task_id.to_owned();
     let model_id = model.id.clone();
     let role = role.to_owned();
+    let model_name = model.display_name.clone();
     let logical_id = id();
     CallContext {
         cancel: cancel.clone(),
@@ -486,7 +812,7 @@ fn context(
                 super::gateway::CallEvent::AttemptStarting(n) => ("sending", n),
                 super::gateway::CallEvent::HeadersReceived(n) => ("responseHeaders", n),
             };
-            attempts.push(json!({"modelId":model_id,"role":role,"callId":logical_id,"attempt":attempt,"phase":phase,"at":chrono::Utc::now().to_rfc3339()}));
+            attempts.push(json!({"modelId":model_id,"modelName":model_name,"role":role,"callId":logical_id,"attempt":attempt,"phase":phase,"at":chrono::Utc::now().to_rfc3339()}));
             db.execute(
                 "UPDATE ai_tasks SET call_attempts=?1 WHERE id=?2",
                 rusqlite::params![serde_json::to_string(&attempts).unwrap(), task_id],
@@ -510,7 +836,7 @@ async fn independent(
         messages: vec![
             Message {
                 role: "system".into(),
-                content: INDEPENDENT.into(),
+                content: format!("{} {}", INDEPENDENT, "若快照包含position证据，必须同时给出conservative稳健持仓、intraday做T、swing中短线三种操作建议，放在claims中各至少一项，并增加strategy、trigger触发条件、invalidation失效条件、quantityBasis数量依据、feeImpact费用影响字段。每项必须引用position证据ID以及相关行情依据。结合最新报价在日内区间和近60日日线中的位置、FIFO均价、摊薄成本、本轮及最近交易。尊重available可卖数量和settlement；未知交易制度不得假设T+0，做T无法成立时明确建议等待。只给条件式操作与数量依据，不输出具体交易股数或自动下单指令；资金余额未提供，不能判断买入或加仓能力。不虚构目标价、支撑位、费用或盈利；费率未确认时标明测算不足。三种策略可能互相冲突，要说明适用条件、先后次序和不操作的条件。没有position时不要假设用户持仓或交易历史。"),
             },
             Message {
                 role: "user".into(),
@@ -532,15 +858,25 @@ async fn independent(
     response.content = response.content.replace(key, "[密钥已隐藏]");
     let evidence_ids = s.evidence.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
     let validate = |raw: &str| {
-        validate_report_for_window(
+        let body = validate_report_for_window(
             raw,
             &evidence_ids,
             s.windows["todayMode"].as_str().unwrap_or(""),
             s.source_states["quoteIsCurrent"] == true,
-        )
+        )?;
+        validate_strategies(&body, s)?;
+        Ok(body)
     };
     let mut body = validate(&response.content);
     if body.is_err() && !cancel.is_cancelled() {
+        progress_event(
+            app,
+            task_id,
+            &format!("repair:{}", m.id),
+            "running",
+            &format!("{} · 格式修复", m.display_name),
+            "输出未通过结构、引用或时间窗口校验，进行一次格式修复",
+        )?;
         let mut repair = request.clone();
         repair.messages.push(Message {
             role: "assistant".into(),
@@ -561,13 +897,43 @@ async fn independent(
                 response = v;
                 response.content = response.content.replace(key, "[密钥已隐藏]");
                 body = validate(&response.content);
+                progress_event(
+                    app,
+                    task_id,
+                    &format!("repair:{}", m.id),
+                    if body.is_ok() { "done" } else { "warning" },
+                    &format!("{} · 格式修复", m.display_name),
+                    if body.is_ok() {
+                        "格式修复后校验通过"
+                    } else {
+                        "修复后仍未通过校验"
+                    },
+                )?;
             }
             Err(e) => {
+                progress_event(
+                    app,
+                    task_id,
+                    &format!("repair:{}", m.id),
+                    "failed",
+                    &format!("{} · 格式修复", m.display_name),
+                    &e.message,
+                )?;
                 let mut e = e;
                 e.message = format!("{}：{}", m.display_name, e.message);
                 error_record(app, task_id, &e)?;
             }
         }
+    }
+    if body.is_err() {
+        progress_event(
+            app,
+            task_id,
+            &format!("validation:{}", m.id),
+            "warning",
+            &format!("{} · 报告校验", m.display_name),
+            "结构或引用校验失败，本报告不进入汇总",
+        )?;
     }
     let valid = body.is_ok();
     let b = body.clone().unwrap_or(Value::Null);
@@ -578,7 +944,7 @@ async fn independent(
         windows: b["windows"].clone(),
         claims: b["claims"].clone(),
         raw_output: response.content,
-        validation: json!({"valid":valid,"scope":"结构与证据引用已校验；推理质量为模型判断"}),
+        validation: json!({"valid":valid,"brief":b["overview"],"scope":"结构与证据引用已校验；推理质量为模型判断"}),
         usage: response.usage,
     };
     let state = app.state::<Store>();
@@ -619,7 +985,7 @@ async fn summarize(
         messages: vec![
             Message {
                 role: "system".into(),
-                content: prompt.into(),
+                content: format!("{} {}",prompt,"持仓报告中conservative、intraday、swing三种操作方向分别汇总为keyClaims各一项，增加strategy字段，引用同一策略的原始claimId。建议正文保留触发、失效条件、可卖数量约束、费用影响和冲突适用条件。不得把互相冲突的策略当成同时执行的命令；缺少依据不形成共识。"),
             },
             Message {
                 role: "user".into(),
@@ -677,6 +1043,7 @@ async fn run(
     task_id: &str,
     security: SecurityRef,
     manual: String,
+    position: Option<PositionContext>,
     models: Vec<(ModelConfig, String)>,
     summary: (ModelConfig, String),
     cancel: &CancellationToken,
@@ -691,7 +1058,12 @@ async fn run(
             .next()
             .ok_or_else(|| invalid("历史快照缺失"))?
     } else {
-        let s = tokio::select! {_=cancel.cancelled()=>return Err(AiError::new("cancelled","分析已取消")),result=collect(&security,&manual)=>result?};
+        let owner = app.clone();
+        let owner_task = task_id.to_owned();
+        let reporter: SourceReporter = std::sync::Arc::new(move |stage, state, label, detail| {
+            progress_event(&owner, &owner_task, stage, state, label, detail)
+        });
+        let s = tokio::select! {_=cancel.cancelled()=>return Err(AiError::new("cancelled","分析已取消")),result=collect(&security,&manual,Some(reporter),position)=>result?};
         {
             let state = app.state::<Store>();
             let mut db = state.0.lock().map_err(|_| AiError::storage())?;
@@ -705,13 +1077,56 @@ async fn run(
             if cancel.is_cancelled() {
                 return Err(AiError::new("cancelled", "分析已取消"));
             }
+            let stage = format!("model:{}", m.id);
+            progress_event(
+                app,
+                task_id,
+                &stage,
+                "running",
+                &format!("{} · 独立分析", m.display_name),
+                "进入分析队列，使用冻结资料分析今日与未来交易窗口",
+            )?;
             if let Err(e) = independent(app, task_id, &s, &m, &key, cancel).await {
+                progress_event(
+                    app,
+                    task_id,
+                    &stage,
+                    if e.code == "cancelled" {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    },
+                    &format!("{} · 独立分析", m.display_name),
+                    &e.message,
+                )?;
                 if e.code == "cancelled" {
                     return Err(e);
                 }
                 let mut e = e;
                 e.message = format!("{}：{}", m.display_name, e.message);
                 error_record(app, task_id, &e)?;
+            } else {
+                let brief = {
+                    let store = app.state::<Store>();
+                    let db = store.0.lock().map_err(|_| AiError::storage())?;
+                    let task = repository::get_task(&db, task_id)?;
+                    task.reports
+                        .iter()
+                        .find(|r| r.model_snapshot.id == m.id)
+                        .and_then(|r| r.validation["brief"].as_str())
+                        .unwrap_or("独立报告已保存，结构及引用校验通过")
+                        .chars()
+                        .take(300)
+                        .collect::<String>()
+                };
+                progress_event(
+                    app,
+                    task_id,
+                    &stage,
+                    "done",
+                    &format!("{} · 独立分析", m.display_name),
+                    &brief,
+                )?;
             }
         }
     }
@@ -719,7 +1134,40 @@ async fn run(
         return Err(AiError::new("cancelled", "分析已取消"));
     }
     status(app, task_id, TaskStatus::Summarizing)?;
-    summarize(app, task_id, &s, &summary.0, &summary.1, cancel).await?;
+    let summary_stage = format!("summary:{}", id());
+    progress_event(
+        app,
+        task_id,
+        &summary_stage,
+        "running",
+        &format!("{} · 对比汇总", summary.0.display_name),
+        "对比有效独立报告，关联每个关键结论与模型依据",
+    )?;
+    match summarize(app, task_id, &s, &summary.0, &summary.1, cancel).await {
+        Ok(()) => progress_event(
+            app,
+            task_id,
+            &summary_stage,
+            "done",
+            &format!("{} · 对比汇总", summary.0.display_name),
+            "汇总结论及模型引用已校验并保存",
+        )?,
+        Err(e) => {
+            progress_event(
+                app,
+                task_id,
+                &summary_stage,
+                if e.code == "cancelled" {
+                    "cancelled"
+                } else {
+                    "failed"
+                },
+                &format!("{} · 对比汇总", summary.0.display_name),
+                &e.message,
+            )?;
+            return Err(e);
+        }
+    }
     let task = {
         let state = app.state::<Store>();
         let db = state.0.lock().map_err(|_| AiError::storage())?;
@@ -740,6 +1188,7 @@ fn spawn(
     task_id: String,
     security: SecurityRef,
     manual: String,
+    position: Option<PositionContext>,
     models: Vec<(ModelConfig, String)>,
     summary: (ModelConfig, String),
     token: CancellationToken,
@@ -751,6 +1200,7 @@ fn spawn(
             &task_id,
             security,
             manual,
+            position,
             models,
             summary,
             &token,
@@ -789,6 +1239,7 @@ pub fn ai_start_stock_analysis(
     app: tauri::AppHandle,
     request: StartRequest,
     manual_material: String,
+    position_context: Option<PositionContext>,
 ) -> AiResult<TaskDetail> {
     if request.securities.len() != 1
         || request.group.is_some()
@@ -796,6 +1247,9 @@ pub fn ai_start_stock_analysis(
         || request.participant_ids.len() > 20
     {
         return Err(invalid("当前支持单股分析、最多20个参与模型和32KB手动资料"));
+    }
+    if let Some(p) = &position_context {
+        validate_position(p, &request.securities[0])?;
     }
     let services = app.state::<AiServices>();
     let mut runs = services.runs.lock().map_err(|_| AiError::storage())?;
@@ -825,6 +1279,7 @@ pub fn ai_start_stock_analysis(
         task.id.clone(),
         request.securities[0].clone(),
         manual_material,
+        position_context,
         models,
         summary,
         token,
@@ -876,6 +1331,7 @@ pub fn ai_resummarize_stock(
         task_id,
         task.request_snapshot.securities[0].clone(),
         String::new(),
+        None,
         vec![],
         summary,
         token,
@@ -897,7 +1353,9 @@ mod tests {
             name: "贵州茅台".into(),
             asset: Asset::Stock,
         };
-        let snapshot = collect(&security, "手工补充资料样例").await.unwrap();
+        let snapshot = collect(&security, "手工补充资料样例", None, None)
+            .await
+            .unwrap();
         assert_eq!(snapshot.security, security);
         assert!(snapshot.reference_price.is_some());
         assert!(snapshot
@@ -909,6 +1367,79 @@ mod tests {
             .evidence
             .iter()
             .any(|e| e.kind == "manual" && e.availability == "userProvided"));
+    }
+    #[test]
+    fn every_operation_claim_requires_conditions_and_position_reference() {
+        let claims=["conservative","intraday","swing"].iter().map(|strategy|json!({"strategy":strategy,"trigger":"条件","invalidation":"失效","quantityBasis":"可卖约束","feeImpact":"费用不足","evidenceIds":["p"]})).collect::<Vec<_>>();
+        let mut body = json!({"claims":claims});
+        assert!(validate_strategy_claims(&body, "p").is_ok());
+        body["claims"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"strategy":"intraday","evidenceIds":["quote"]}));
+        assert!(validate_strategy_claims(&body, "p").is_err());
+        body["claims"].as_array_mut().unwrap().pop();
+        body["claims"][0]["evidenceIds"] = json!(["quote"]);
+        assert!(validate_strategy_claims(&body, "p").is_err());
+    }
+    #[test]
+    fn position_payload_rejects_account_and_other_security_data() {
+        let mut v = json!({"securityId":"sh600519","asOf":"2026-10-12T06:00:00Z","quantity":"100","available":"100","cost":"1000","averageCost":"10","netInvestment":"1000","dilutedCost":"10","settlement":"T+1","roundStart":"2026-10-12T01:00:00Z","feeConfirmed":false,"feeProfile":{"commissionWan":"","minimum":"5","stampPercent":"0.05","transferPercent":"0.001"},"trades":[{"id":"t","securityId":"sh600519","kind":"opening","quantity":"100","price":"10","time":"2026-10-12T01:00:00Z","date":"2026-10-12","note":"","fees":null,"feeSource":"unknown"}]});
+        let p: PositionContext = serde_json::from_value(v.clone()).unwrap();
+        let security = SecurityRef {
+            id: "sh600519".into(),
+            market: "sh".into(),
+            code: "600519".into(),
+            name: "测试".into(),
+            asset: Asset::Stock,
+        };
+        assert!(validate_position(&p, &security).is_ok());
+        v["cash"] = json!("123456");
+        assert!(serde_json::from_value::<PositionContext>(v.clone()).is_err());
+        v.as_object_mut().unwrap().remove("cash");
+        v["trades"][0]["securityId"] = json!("sz000001");
+        assert!(validate_position(&serde_json::from_value(v).unwrap(), &security).is_err());
+    }
+    #[test]
+    fn execution_events_persist_across_task_reads() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        repository::initialize(&db).unwrap();
+        let request = StartRequest {
+            request_id: "trace-fixture".into(),
+            securities: vec![SecurityRef {
+                id: "sh600519".into(),
+                market: "sh".into(),
+                code: "600519".into(),
+                name: "贵州茅台".into(),
+                asset: Asset::Stock,
+            }],
+            group: None,
+            participant_ids: vec!["m".into()],
+            summary_model_id: "m".into(),
+        };
+        let task = repository::create_task(&mut db, &request).unwrap();
+        persist_event(
+            &db,
+            &task.id,
+            "daily",
+            "running",
+            "工具 · 获取日线",
+            "腾讯公开行情",
+        )
+        .unwrap();
+        persist_event(
+            &db,
+            &task.id,
+            "daily",
+            "done",
+            "工具 · 获取日线",
+            "已获取数据",
+        )
+        .unwrap();
+        let task = repository::get_task(&db, &task.id).unwrap();
+        assert_eq!(task.progress["events"].as_array().unwrap().len(), 2);
+        assert_eq!(task.progress["events"][1]["state"], "done");
+        assert!(task.call_attempts.is_empty());
     }
     #[test]
     fn quote_freshness_does_not_turn_morning_price_into_close_review() {

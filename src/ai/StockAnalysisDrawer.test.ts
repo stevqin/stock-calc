@@ -130,6 +130,75 @@ beforeEach(() => {
   vi.mocked(invoke).mockResolvedValue(task);
 });
 describe("single stock AI drawer", () => {
+  it("collapses setup immediately on start and can expand again", async () => {
+    let resolve!: (value: TaskDetail) => void;
+    vi.mocked(invoke).mockImplementationOnce(
+      () =>
+        new Promise<any>((r) => {
+          resolve = r;
+        }),
+    );
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "开始分析")!
+      .trigger("click");
+    expect(w.get(".ai-setup-body").isVisible()).toBe(false);
+    expect(w.get(".ai-setup-compact").text()).toContain("预计 3 次");
+    await w.get('button[aria-label="展开模型与资料"]').trigger("click");
+    expect(
+      w.get('button[aria-label="收起模型与资料"]').attributes("aria-expanded"),
+    ).toBe("true");
+    expect(
+      (w.get(".ai-setup-body").element as HTMLElement).style.display,
+    ).not.toBe("none");
+    resolve(task);
+    await flushPromises();
+    w.unmount();
+  });
+  it("shows persisted tool stages, elapsed time and public analysis summaries", async () => {
+    const traced = {
+      ...task,
+      progress: {
+        events: [
+          {
+            stage: "daily",
+            state: "running",
+            label: "工具 · 获取日线",
+            detail: "腾讯公开行情",
+            at: "2026-10-13T10:00:00Z",
+          },
+          {
+            stage: "daily",
+            state: "done",
+            label: "工具 · 获取日线",
+            detail: "已获取数据",
+            at: "2026-10-13T10:00:02Z",
+          },
+          {
+            stage: "model",
+            state: "done",
+            label: "模型一 · 独立分析",
+            detail: "公开结论摘要",
+            at: "2026-10-13T10:00:04Z",
+          },
+        ],
+      },
+    };
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [traced],
+      nextCursor: null,
+    });
+    vi.mocked(loadTask).mockResolvedValue(traced);
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    expect(w.get(".ai-execution-trace").text()).toContain("工具 · 获取日线");
+    expect(w.get(".ai-execution-trace").text()).toContain("2 秒");
+    expect(w.get(".ai-execution-trace").text()).toContain("公开结论摘要");
+    expect(invoke).not.toHaveBeenCalled();
+    w.unmount();
+  });
   it("shows call estimate, starts chosen models without altering defaults", async () => {
     const w = mount(StockAnalysisDrawer, { props: { security } });
     await flushPromises();

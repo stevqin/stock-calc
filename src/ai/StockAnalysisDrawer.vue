@@ -9,7 +9,17 @@ import type {
   IndependentReport,
   SummaryVersion,
 } from "./types";
-const props = defineProps<{ security: SecurityRef }>();
+import type { PositionContext } from "./positionContext";
+const props = defineProps<{
+  security: SecurityRef;
+  positionContext?: PositionContext | null;
+}>();
+const includePosition = ref(true);
+const strategyLabels: Record<string, string> = {
+  conservative: "稳健持仓",
+  intraday: "做 T",
+  swing: "中短线",
+};
 const emit = defineEmits<{ close: []; settings: [] }>();
 const desktop = isTauri();
 const models = ref<ModelConfig[]>([]),
@@ -25,6 +35,64 @@ let disposed = false,
   generation = 0,
   timer: ReturnType<typeof setTimeout> | undefined;
 const previousFocus = document.activeElement as HTMLElement | null;
+const setupCollapsed = ref(false),
+  clock = ref(Date.now());
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+const traceRows = computed(() => {
+  const events = arr((detail.value?.progress as any)?.events);
+  const rows = new Map<string, any>();
+  for (const event of events) {
+    if (typeof event.stage !== "string" || typeof event.at !== "string")
+      continue;
+    const previous = rows.get(event.stage);
+    rows.set(event.stage, { ...event, startAt: previous?.startAt ?? event.at });
+  }
+  return [...rows.values()];
+});
+const callRows = computed(() => {
+  const rows = new Map<string, any>();
+  for (const value of detail.value?.callAttempts ?? []) {
+    const event = value as any;
+    if (!event.callId || !event.at) continue;
+    const key = event.callId + ":" + event.attempt;
+    rows.set(key, { ...event });
+  }
+  return [...rows.values()];
+});
+function elapsed(row: any) {
+  if (row.state === "running" && !active.value) return "未记录结束时间";
+  const end = row.state === "running" ? clock.value : Date.parse(row.at);
+  const start = Date.parse(row.startAt);
+  if (!Number.isFinite(end) || !Number.isFinite(start)) return "";
+  return `${Math.max(0, Math.floor((end - start) / 1000))} 秒`;
+}
+function eventState(row: any) {
+  return row.state === "running"
+    ? active.value
+      ? "进行中"
+      : "未完成"
+    : ((
+        {
+          done: "已完成",
+          warning: "需注意",
+          failed: "失败",
+          cancelled: "已取消",
+        } as Record<string, string>
+      )[row.state] ?? row.state);
+}
+function modelName(id: string) {
+  return (
+    models.value.find((m) => m.id === id)?.displayName ??
+    detail.value?.reports.find((r) => r.modelSnapshot.id === id)?.modelSnapshot
+      .displayName ??
+    "模型"
+  );
+}
+const roleLabels: Record<string, string> = {
+  independent: "独立分析",
+  repair: "格式修复",
+  summary: "对比汇总",
+};
 const active = computed(
   () =>
     !!detail.value &&
@@ -187,6 +255,10 @@ async function poll(taskId: string, token: number) {
   }
 }
 function watchTask(task: TaskDetail) {
+  if (
+    ["pending", "collecting", "analyzing", "summarizing"].includes(task.status)
+  )
+    setupCollapsed.value = true;
   stop();
   detail.value = task;
   summaryId.value = "";
@@ -203,6 +275,7 @@ async function start() {
   )
     return;
   loading.value = true;
+  setupCollapsed.value = true;
   error.value = "";
   try {
     const security = {
@@ -221,10 +294,16 @@ async function start() {
         summaryModelId: summary.value,
       },
       manualMaterial: manual.value,
+      positionContext: includePosition.value
+        ? (props.positionContext ?? null)
+        : null,
     });
     if (!disposed) watchTask(task);
   } catch (e) {
-    if (!disposed) error.value = aiErrorMessage(e);
+    if (!disposed) {
+      error.value = aiErrorMessage(e);
+      setupCollapsed.value = false;
+    }
   } finally {
     if (!disposed) loading.value = false;
   }
@@ -232,6 +311,7 @@ async function start() {
 async function resummarize() {
   if (!detail.value || active.value || loading.value || !summary.value) return;
   loading.value = true;
+  setupCollapsed.value = true;
   error.value = "";
   try {
     const task = await invoke<TaskDetail>("ai_resummarize_stock", {
@@ -276,6 +356,9 @@ function keys(e: KeyboardEvent) {
   }
 }
 onMounted(async () => {
+  clockTimer = setInterval(() => {
+    clock.value = Date.now();
+  }, 1000);
   await nextTick();
   root.value?.querySelector<HTMLButtonElement>(".ai-close")?.focus();
   if (!desktop) return;
@@ -301,6 +384,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  if (clockTimer) clearInterval(clockTimer);
   stop();
   previousFocus?.focus({ preventScroll: true });
 });
@@ -331,68 +415,116 @@ onBeforeUnmount(() => {
         </p>
         <p v-if="error" role="alert" class="ai-message ai-error">{{ error }}</p>
         <section class="ai-settings-card ai-analysis-setup">
-          <h3>分析模型与资料</h3>
-          <p>
-            自动获取行情、分时、日线、主力资金流和公告列表。新闻与公告正文需手动补充；未取得的资料会在报告中明确标示。
-          </p>
-          <p v-if="desktop && !enabled.length">请先在设置中配置并启用模型。</p>
-          <div class="ai-default-list">
-            <label v-for="m in enabled" :key="m.id" class="ai-check"
-              ><input
-                type="checkbox"
-                v-model="selected"
-                :value="m.id"
-                :disabled="active || loading"
-              />{{ m.displayName }} <small>{{ m.model }}</small></label
+          <div class="ai-setup-header">
+            <h3>分析模型与资料</h3>
+            <button
+              :aria-label="setupCollapsed ? '展开模型与资料' : '收起模型与资料'"
+              :aria-expanded="!setupCollapsed"
+              @click="setupCollapsed = !setupCollapsed"
             >
-          </div>
-          <label
-            >本次汇总模型<select
-              v-model="summary"
-              aria-label="本次汇总模型"
-              :disabled="active || loading"
-            >
-              <option value="">请选择</option>
-              <option v-for="m in enabled" :key="m.id" :value="m.id">
-                {{ m.displayName }} · {{ m.model }}
-              </option>
-            </select></label
-          >
-          <label
-            >手动补充新闻、公告或分析资料<textarea
-              v-model="manual"
-              aria-label="补充分析资料"
-              maxlength="10000"
-              :disabled="active || loading"
-              rows="3"
-              placeholder="粘贴资料文字，建议包含日期和来源链接。不要粘贴密钥。"
-            />
-          </label>
-          <p class="ai-source-links">
-            <a
-              :href="newsUrl"
-              @click.prevent="openSource(newsUrl)"
-              target="_blank"
-              rel="noopener noreferrer"
-              >新闻来源</a
-            ><a
-              :href="announcementUrl"
-              @click.prevent="openSource(announcementUrl)"
-              target="_blank"
-              rel="noopener noreferrer"
-              >公告来源</a
-            ><button @click="emit('settings')" :disabled="active">
-              模型设置
+              {{ setupCollapsed ? "展开" : "收起" }}
             </button>
+          </div>
+          <p v-if="setupCollapsed" class="ai-setup-compact">
+            {{ selected.length }} 个独立模型 · 汇总：{{ modelName(summary) }} ·
+            预计 {{ estimate }} 次调用 <small>重试可能增加次数</small>
           </p>
-          <p>
-            单次最多选择 20 个模型；预计调用 {{ estimate }} 次（{{
-              selected.length
-            }}
-            次独立分析 + 1 次汇总）。失败重试与格式修复可能增加到
-            {{ selected.length * 3 + 2 }} 次；每次最多生成 8192
-            token，可能计费。临时选择不会修改默认配置。
-          </p>
+          <div v-show="!setupCollapsed" class="ai-setup-body">
+            <p>
+              自动获取行情、分时、日线、主力资金流和公告列表。新闻与公告正文需手动补充；未取得的资料会在报告中明确标示。
+            </p>
+            <p v-if="desktop && !enabled.length">
+              请先在设置中配置并启用模型。
+            </p>
+            <div v-if="positionContext" class="ai-position-context">
+              <label
+                ><input
+                  type="checkbox"
+                  v-model="includePosition"
+                  :disabled="active || loading"
+                />结合持仓与本轮交易记录</label
+              >
+              <p>
+                持仓 {{ positionContext.quantity }} 股 · 可卖
+                {{ positionContext.available }} 股 · FIFO均价
+                {{ positionContext.averageCost ?? "未知" }} · 摊薄成本
+                {{ positionContext.dilutedCost ?? "未知" }} ·
+                {{ positionContext.settlement }}
+              </p>
+              <p>
+                本轮起于 {{ date(positionContext.roundStart) }}，共
+                {{
+                  positionContext.trades.length
+                }}
+                笔记录。将向所选独立模型与汇总模型发送本股持仓、交易、费用及备注，并随报告本地保存。
+              </p>
+              <details>
+                <summary>查看将发送的持仓资料</summary>
+                <pre>{{ JSON.stringify(positionContext, null, 2) }}</pre>
+              </details>
+            </div>
+            <p>
+              结合持仓资料时，同时分析稳健持仓、做
+              T、中短线三种操作方向，分别给出条件与依据。
+            </p>
+            <div class="ai-default-list">
+              <label v-for="m in enabled" :key="m.id" class="ai-check"
+                ><input
+                  type="checkbox"
+                  v-model="selected"
+                  :value="m.id"
+                  :disabled="active || loading"
+                />{{ m.displayName }} <small>{{ m.model }}</small></label
+              >
+            </div>
+            <label
+              >本次汇总模型<select
+                v-model="summary"
+                aria-label="本次汇总模型"
+                :disabled="active || loading"
+              >
+                <option value="">请选择</option>
+                <option v-for="m in enabled" :key="m.id" :value="m.id">
+                  {{ m.displayName }} · {{ m.model }}
+                </option>
+              </select></label
+            >
+            <label
+              >手动补充新闻、公告或分析资料<textarea
+                v-model="manual"
+                aria-label="补充分析资料"
+                maxlength="10000"
+                :disabled="active || loading"
+                rows="3"
+                placeholder="粘贴资料文字，建议包含日期和来源链接。不要粘贴密钥。"
+              />
+            </label>
+            <p class="ai-source-links">
+              <a
+                :href="newsUrl"
+                @click.prevent="openSource(newsUrl)"
+                target="_blank"
+                rel="noopener noreferrer"
+                >新闻来源</a
+              ><a
+                :href="announcementUrl"
+                @click.prevent="openSource(announcementUrl)"
+                target="_blank"
+                rel="noopener noreferrer"
+                >公告来源</a
+              ><button @click="emit('settings')" :disabled="active">
+                模型设置
+              </button>
+            </p>
+            <p>
+              单次最多选择 20 个模型；预计调用 {{ estimate }} 次（{{
+                selected.length
+              }}
+              次独立分析 + 1 次汇总）。失败重试与格式修复可能增加到
+              {{ selected.length * 3 + 2 }} 次；每次最多生成 8192
+              token，可能计费。临时选择不会修改默认配置。
+            </p>
+          </div>
           <div class="ai-form-actions">
             <button
               class="primary"
@@ -406,7 +538,9 @@ onBeforeUnmount(() => {
               "
               @click="start"
             >
-              {{ detail ? "重新分析" : "开始分析" }}</button
+              {{
+                active ? "分析进行中" : detail ? "重新分析" : "开始分析"
+              }}</button
             ><button v-if="active" @click="cancel">取消分析</button
             ><button
               v-if="validReports.length"
@@ -440,6 +574,55 @@ onBeforeUnmount(() => {
           ><small
             >打开历史不会调用模型；关闭抽屉后任务继续运行，报告长期保存在本机。</small
           >
+        </section>
+        <section
+          v-if="detail"
+          class="ai-settings-card ai-execution-trace"
+          aria-label="分析执行过程"
+        >
+          <div class="ai-trace-header">
+            <h3>分析过程</h3>
+            <small>执行记录 · 数据工具、模型调用与校验</small>
+          </div>
+          <p v-if="!traceRows.length">
+            {{
+              active
+                ? "正在启动任务，等待阶段记录…"
+                : "该历史报告未保存阶段记录，可查看调用明细和报告依据。"
+            }}
+          </p>
+          <ol v-if="traceRows.length" class="ai-trace-list">
+            <li
+              v-for="row in traceRows"
+              :key="row.stage"
+              :class="['trace-' + row.state]"
+            >
+              <div>
+                <strong>{{ row.label }}</strong
+                ><span>{{ eventState(row) }} · {{ elapsed(row) }}</span>
+              </div>
+              <p>{{ row.detail }}</p>
+            </li>
+          </ol>
+          <small v-if="(detail.progress as any)?.eventsTruncated"
+            >仅显示最近1000条阶段记录，模型调用记录仍保留。</small
+          >
+          <details v-if="callRows.length">
+            <summary>模型调用明细 · {{ attemptedCalls }} 次尝试</summary>
+            <p v-for="(call, i) in callRows" :key="i">
+              {{ call.modelName ?? modelName(call.modelId) }} ·
+              {{ roleLabels[call.role] ?? call.role }} · 第
+              {{ call.attempt }} 次尝试 ·
+              {{
+                call.phase === "sending"
+                  ? active
+                    ? "已发送，等待响应"
+                    : "未记录响应"
+                  : "已收到服务商响应"
+              }}
+              · {{ date(call.at) }}
+            </p>
+          </details>
         </section>
         <section v-if="detail" class="ai-analysis-status">
           <strong>{{ status[detail.status] }}</strong
@@ -529,7 +712,11 @@ onBeforeUnmount(() => {
             class="ai-claim"
           >
             <summary>
-              {{ claim.text }}<small>{{ agreement(claim) }}</small>
+              {{
+                strategyLabels[claim.strategy]
+                  ? strategyLabels[claim.strategy] + " · "
+                  : ""
+              }}{{ claim.text }}<small>{{ agreement(claim) }}</small>
             </summary>
             <article v-for="row in supportRows(claim)" :key="row.report!.id">
               <strong>{{ row.report!.modelSnapshot.displayName }}</strong>
@@ -582,6 +769,19 @@ onBeforeUnmount(() => {
             </h4>
             <p>{{ w.logic }}</p>
           </article>
+          <article
+            v-for="c in arr(report.claims).filter(
+              (c) => strategyLabels[c.strategy],
+            )"
+            :key="c.id"
+            class="ai-report-window"
+          >
+            <h4>{{ strategyLabels[c.strategy] }}</h4>
+            <p>{{ c.text }}</p>
+            <p>触发条件：{{ c.trigger }}</p>
+            <p>失效条件：{{ c.invalidation }}</p>
+            <p>数量依据：{{ c.quantityBasis }}；费用影响：{{ c.feeImpact }}</p>
+          </article>
           <details>
             <summary>模型原始输出</summary>
             <pre>{{ report.rawOutput }}</pre>
@@ -631,7 +831,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #758293;
 }
-.ai-analysis-setup > label {
+.ai-setup-body > label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -725,5 +925,81 @@ details > summary {
 h4 {
   font-size: 14px;
   margin: 10px 0;
+}
+.ai-setup-header,
+.ai-trace-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.ai-setup-header h3,
+.ai-trace-header h3 {
+  margin: 0;
+}
+.ai-setup-header button {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 10px;
+}
+.ai-setup-compact {
+  color: #586b82;
+  margin: 12px 0;
+}
+.ai-setup-compact small {
+  margin-left: 8px;
+}
+.ai-trace-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+.ai-trace-list li {
+  border-left: 2px solid #dce4ef;
+  padding: 0 0 14px 16px;
+  margin-left: 4px;
+  position: relative;
+}
+.ai-trace-list li::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8595aa;
+}
+.ai-trace-list .trace-done::before {
+  background: #339277;
+}
+.ai-trace-list .trace-running::before {
+  background: #3268cf;
+  box-shadow: 0 0 0 4px #e3ecfb;
+}
+.ai-trace-list .trace-failed::before,
+.ai-trace-list .trace-warning::before {
+  background: #c28436;
+}
+.ai-trace-list li > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.ai-trace-list li > div > span {
+  font-size: 12px;
+  color: #758293;
+  white-space: nowrap;
+}
+.ai-trace-list p {
+  margin: 6px 0 0;
+  color: #66788d;
+  font-size: 12px;
+}
+.ai-execution-trace > details {
+  border-top: 1px solid #e1e7ef;
+  padding-top: 12px;
+  margin-top: 8px;
 }
 </style>

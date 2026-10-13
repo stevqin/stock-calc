@@ -29,6 +29,17 @@ import SettingsHub from "./components/SettingsHub.vue";
 import StockAnalysisDrawer from "./ai/StockAnalysisDrawer.vue";
 import type { SecurityRef } from "./ai/types";
 const aiSecurity = ref<SecurityRef | null>(null);
+import { positionContext } from "./ai/positionContext";
+const aiPosition = computed(() =>
+  aiSecurity.value
+    ? positionContext(
+        account.value,
+        aiSecurity.value.id,
+        ledger.value.positions[aiSecurity.value.id],
+        new Date().toISOString(),
+      )
+    : null,
+);
 import { clearAnalysisHistory } from "./analysisHistory";
 import { manualAccount, upgradeAccount } from "./sim/record";
 import { replay, validateAccount, validateSecurity } from "./sim/ledger";
@@ -1945,6 +1956,7 @@ onBeforeUnmount(() => {
       v-if="aiSecurity"
       :key="aiSecurity.id"
       :security="aiSecurity"
+      :position-context="aiPosition"
       @close="aiSecurity = null"
       @settings="
         aiSecurity = null;

@@ -31,3 +31,11 @@
 macOS 打包使用 Tauri app 构建与 ad-hoc 签名，再执行 codesign 和 DMG 校验。当前执行环境没有 npm，前端已用现有 Node/Vue/Vite 运行时单独构建；此次构建临时覆盖 beforeBuildCommand，未改变正式项目打包配置。
 
 新闻/公告采集、AI 报告生成和分组分析仍属于原实施计划的后续阶段；此次运行版可先供用户输入并测试模型配置。
+
+## 本轮打包与运行结果
+
+- 应用：`src-tauri/target/release/bundle/macos/T刻.app`，版本 0.6.0。
+- 安装包：`src-tauri/target/release/bundle/dmg/T刻_0.6.0_aarch64.dmg`。
+- Release 构建完成，codesign --verify --deep --strict 通过，hdiutil verify 校验和有效。
+- 正常退出旧实例后启动新构建，实际桌面界面显示统一「设置」入口，已打开 AI 模型新增表单，新增/保存按钮可用。
+- 用户凭证由用户自行填写；未输入、读取或发送用户 API Key。

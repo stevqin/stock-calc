@@ -100,6 +100,8 @@ pub async fn ai_test_model(
                 }],
                 max_tokens: 64,
                 disable_thinking: true,
+                json_mode: false,
+                structured_tool: None,
             },
             &CallContext {
                 cancel: CancellationToken::new(),
@@ -126,8 +128,40 @@ pub fn ai_list_history(
     repository::list_history(&*lock(&store)?, &query)
 }
 #[tauri::command]
-pub fn ai_delete_task(store: tauri::State<'_, Store>, task_id: String) -> AiResult<()> {
-    repository::delete_task(&mut *lock(&store)?, &task_id)
+pub fn ai_delete_task(
+    store: tauri::State<'_, Store>,
+    services: tauri::State<'_, AiServices>,
+    task_id: String,
+) -> AiResult<()> {
+    let runs = services.runs.lock().map_err(|_| AiError::storage())?;
+    let mut db = lock(&store)?;
+    if repository::managed_task_ids(&db, &task_id)?
+        .iter()
+        .any(|id| runs.contains_key(id))
+    {
+        return Err(AiError::new("taskActive", "分析尚未停止，请等待任务结束"));
+    }
+    repository::delete_task(&mut db, &task_id)
+}
+#[tauri::command]
+pub fn ai_restore_task(store: tauri::State<'_, Store>, task_id: String) -> AiResult<()> {
+    repository::restore_task(&mut *lock(&store)?, &task_id)
+}
+#[tauri::command]
+pub fn ai_purge_task(
+    store: tauri::State<'_, Store>,
+    services: tauri::State<'_, AiServices>,
+    task_id: String,
+) -> AiResult<()> {
+    let runs = services.runs.lock().map_err(|_| AiError::storage())?;
+    let mut db = lock(&store)?;
+    if repository::managed_task_ids(&db, &task_id)?
+        .iter()
+        .any(|id| runs.contains_key(id))
+    {
+        return Err(AiError::new("taskActive", "分析尚未停止"));
+    }
+    repository::purge_task(&mut db, &task_id)
 }
 
 fn public_source_url(raw: &str) -> AiResult<String> {

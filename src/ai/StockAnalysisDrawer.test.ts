@@ -12,6 +12,8 @@ vi.mock("./client", () => ({
   modelClient: { listModels: vi.fn(), getDefaults: vi.fn() },
   listHistory: vi.fn(),
   loadTask: vi.fn(),
+  restoreTask: vi.fn().mockResolvedValue(undefined),
+  purgeTask: vi.fn().mockResolvedValue(undefined),
   aiErrorMessage: (e: any) => e.message ?? "失败",
 }));
 const security = {
@@ -130,6 +132,167 @@ beforeEach(() => {
   vi.mocked(invoke).mockResolvedValue(task);
 });
 describe("single stock AI drawer", () => {
+  it("distinguishes received headers from a complete generated response", async () => {
+    const pending = structuredClone(task);
+    pending.status = "analyzing";
+    pending.callAttempts = [
+      {
+        callId: "one",
+        attempt: 1,
+        phase: "responseHeaders",
+        role: "repair",
+        modelId: "m1",
+        at: "2026-10-14T06:00:00Z",
+      },
+    ];
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [pending],
+      nextCursor: null,
+    });
+    vi.mocked(loadTask).mockResolvedValue(pending);
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    expect(w.text()).toContain("接口已响应，等待生成/接收完整报告");
+    expect(w.text()).not.toContain("完整响应已接收");
+    w.unmount();
+  });
+  it("restoring the only deleted report reopens it in the same drawer", async () => {
+    vi.mocked(listHistory).mockImplementation(async (q) =>
+      q.trashed
+        ? {
+            items: [{ ...task, deletedAt: "2026-10-14T06:00:00Z" }],
+            nextCursor: null,
+          }
+        : { items: [], nextCursor: null },
+    );
+    const w = mount(StockAnalysisDrawer, {
+      props: { security },
+      global: { stubs: { teleport: true } },
+    });
+    await flushPromises();
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "回收站")!
+      .trigger("click");
+    await flushPromises();
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [task],
+      nextCursor: null,
+    });
+    await w.get("[data-restore]").trigger("click");
+    await flushPromises();
+    expect(w.find(".ai-summary-card").exists()).toBe(true);
+    w.unmount();
+  });
+  it("shows five V2 operations and the frozen cash instead of current account props", async () => {
+    const ops = [
+      "today",
+      "week",
+      "conservative",
+      "shortTerm",
+      "mediumLongTerm",
+    ].map((operationType) => ({
+      operationType,
+      text: "等待确认",
+      reason: "持仓依据",
+      status: "wait",
+      action: "wait",
+      horizon: "冻结窗口",
+      trigger: "满足条件",
+      invalidation: "停止条件",
+      quantityBasis: "仅可卖底仓",
+      cashBasis: "冻结余额限制",
+      feeImpact: "费用不足",
+      conflictsWith: [],
+      supports: [{ reportId: "r1", claimId: "c1" }],
+    }));
+    const v2 = structuredClone(task);
+    (v2.securitySnapshots[0].ruleVersions as any).format = 2;
+    v2.securitySnapshots[0].evidence.push({
+      ...v2.securitySnapshots[0].evidence[0],
+      id: "cash",
+      kind: "cash",
+      content: JSON.stringify({
+        balance: "1234.56",
+        initialized: true,
+        hasWarnings: false,
+      }),
+    });
+    v2.summaryVersions[0].keyClaims = ops;
+    vi.mocked(listHistory).mockResolvedValue({ items: [v2], nextCursor: null });
+    vi.mocked(loadTask).mockResolvedValue(v2);
+    const w = mount(StockAnalysisDrawer, {
+      props: {
+        security,
+        cashContext: {
+          balance: "99999",
+          asOf: "2026-10-14T06:00:00Z",
+          initialized: true,
+          hasWarnings: false,
+          source: "localLedger",
+        },
+      },
+    });
+    await flushPromises();
+    expect(w.findAll(".ai-v2-operation")).toHaveLength(1);
+    expect(w.findAll('[role="tab"]')).toHaveLength(5);
+    expect(w.find(".ai-report-context").attributes("open")).toBeUndefined();
+    expect(w.get(".ai-frozen-account").text()).toContain("1,234.56");
+    expect(w.get(".ai-frozen-account").text()).not.toContain("99,999");
+    w.unmount();
+  });
+  it("confirms soft deletion without automatically cancelling or calling a model", async () => {
+    vi.mocked(listHistory)
+      .mockResolvedValueOnce({ items: [task], nextCursor: null })
+      .mockResolvedValue({ items: [], nextCursor: null });
+    const w = mount(StockAnalysisDrawer, {
+      props: { security },
+      global: { stubs: { teleport: true } },
+    });
+    await flushPromises();
+    const del = w.findAll("button").find((b) => b.text() === "删除报告")!;
+    await del.trigger("click");
+    expect(invoke).not.toHaveBeenCalled();
+    expect(w.find('[role="alertdialog"]').exists()).toBe(true);
+    await w.get("[data-confirm-purge]").trigger("click");
+    await flushPromises();
+    expect(invoke).toHaveBeenCalledWith("ai_delete_task", { taskId: "t1" });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    w.unmount();
+  });
+  it("does not count an invalid saved output as a successful independent report", async () => {
+    const broken: TaskDetail = {
+      ...task,
+      status: "partial",
+      reports: [
+        {
+          ...report,
+          validation: { valid: false, error: "持仓报告缺少三种操作方向" },
+        },
+      ],
+      summaryVersions: [],
+      errors: [
+        {
+          code: "invalidAnalysis",
+          message: "持仓报告缺少三种操作方向",
+          retryable: false,
+        },
+      ],
+    };
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [broken],
+      nextCursor: null,
+    });
+    vi.mocked(loadTask).mockResolvedValue(broken);
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    expect(w.get(".ai-report-state").text()).toContain("分析失败");
+    expect(w.get(".ai-report-state").text()).toContain("0/1 份有效独立报告");
+    expect(w.text()).toContain("已收到 1 份输出，1 份未通过校验");
+    expect(w.find(".ai-summary-card").exists()).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+    w.unmount();
+  });
   it("shows all three strategy conclusions without opening model evidence", async () => {
     const strategyTask = structuredClone(task);
     strategyTask.summaryVersions[0].keyClaims = [
@@ -404,6 +567,35 @@ describe("single stock AI drawer", () => {
       "ai_start_stock_analysis",
       expect.anything(),
     );
+    w.unmount();
+  });
+  it("shows first and repair outputs separately without calling models", async () => {
+    const audited = structuredClone(task);
+    (audited.reports[0] as any).outputs = [
+      {
+        role: "independent",
+        rawOutput: "FIRST_OUTPUT",
+        validation: { valid: false, error: "claims[0].id：缺少必填字段" },
+      },
+      {
+        role: "repair",
+        rawOutput: "REPAIR_OUTPUT",
+        validation: { valid: true },
+      },
+    ];
+    vi.mocked(listHistory).mockResolvedValue({
+      items: [audited],
+      nextCursor: null,
+    });
+    vi.mocked(loadTask).mockResolvedValue(audited);
+    const w = mount(StockAnalysisDrawer, { props: { security } });
+    await flushPromises();
+    expect(w.text()).toContain("首次输出");
+    expect(w.text()).toContain("格式修复输出");
+    expect(w.text()).toContain("FIRST_OUTPUT");
+    expect(w.text()).toContain("REPAIR_OUTPUT");
+    expect(w.text()).toContain("claims[0].id");
+    expect(invoke).not.toHaveBeenCalled();
     w.unmount();
   });
 });

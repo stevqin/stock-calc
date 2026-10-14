@@ -42,6 +42,10 @@ export const listHistory = (query: HistoryQuery) =>
   invoke<HistoryPage>("ai_list_history", { query });
 export const deleteTask = (taskId: string) =>
   invoke<void>("ai_delete_task", { taskId });
+export const restoreTask = (taskId: string) =>
+  invoke<void>("ai_restore_task", { taskId });
+export const purgeTask = (taskId: string) =>
+  invoke<void>("ai_purge_task", { taskId });
 export function aiErrorMessage(error: unknown): string {
   if (
     error &&

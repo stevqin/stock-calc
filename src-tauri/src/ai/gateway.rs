@@ -13,6 +13,10 @@ pub struct CompletionRequest {
     pub max_tokens: u32,
     #[serde(default)]
     pub disable_thinking: bool,
+    #[serde(default)]
+    pub json_mode: bool,
+    #[serde(default)]
+    pub structured_tool: Option<serde_json::Value>,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,11 +24,13 @@ pub struct CompletionResponse {
     pub content: String,
     pub usage: Option<serde_json::Value>,
     pub attempts: u32,
+    pub finish_reason: Option<String>,
 }
 #[derive(Clone, Copy, Debug)]
 pub enum CallEvent {
     AttemptStarting(u32),
     HeadersReceived(u32),
+    ResponseCompleted(u32),
 }
 pub struct CallContext {
     pub cancel: CancellationToken,
@@ -43,6 +49,8 @@ impl CallContext {
 pub struct Gateway {
     client: reqwest::Client,
     scheduler: Scheduler,
+    header_timeout: Duration,
+    generation_timeout: Duration,
 }
 fn retry_delay(value: Option<&str>, now: i64) -> Duration {
     let Some(value) = value else {
@@ -110,13 +118,14 @@ impl Gateway {
     pub fn new() -> AiResult<Self> {
         Ok(Self {
             client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
                 .connect_timeout(Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
                 .user_agent(concat!("TCalculator/", env!("CARGO_PKG_VERSION"), " AI"))
                 .build()
                 .map_err(|_| error("connection", "无法初始化模型连接"))?,
             scheduler: Scheduler::new(),
+            header_timeout: Duration::from_secs(60),
+            generation_timeout: Duration::from_secs(300),
         })
     }
     pub async fn list_model_versions(
@@ -142,6 +151,7 @@ impl Gateway {
         let mut response = self
             .client
             .get(endpoint)
+            .timeout(Duration::from_secs(120))
             .bearer_auth(secret)
             .send()
             .await
@@ -212,7 +222,30 @@ impl Gateway {
         } else {
             "max_tokens"
         }] = request.max_tokens.into();
-        if is_mimo(config) && request.disable_thinking {
+        let tool = if is_mimo(config) {
+            request.structured_tool.as_ref()
+        } else {
+            None
+        };
+        if tool.is_none()
+            && is_mimo(config)
+            && request.json_mode
+            && [
+                "mimo-v2.6-flash",
+                "mimo-v2.6-pro",
+                "mimo-v2.6-pro-ultraspeed",
+                "mimo-v2.5-pro",
+                "mimo-v2.5",
+            ]
+            .contains(&config.model.as_str())
+        {
+            payload["response_format"] = serde_json::json!({"type":"json_object"});
+        }
+        if let Some(tool) = tool {
+            payload["tools"] = serde_json::json!([{"type":"function","function":tool}]);
+            payload["tool_choice"] = serde_json::json!("auto");
+        }
+        if is_mimo(config) && (request.disable_thinking || tool.is_some()) {
             payload["thinking"] = serde_json::json!({"type":"disabled"});
         }
         if serde_json::to_vec(&payload)
@@ -223,34 +256,40 @@ impl Gateway {
             return Err(error("requestTooLarge", "模型资料超过2MB，请减少分析资料"));
         }
         let mut attempts = 0;
-        'attempt: loop {
+        loop {
             let permit = self.scheduler.acquire(&origin, &context.cancel).await?;
             attempts += 1;
             context.record(CallEvent::AttemptStarting(attempts))?;
-            let response = tokio::select! {biased;_=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),r=self.client.post(&endpoint).bearer_auth(secret).json(&payload).send()=>r};
-            let mut response = match response {
-                Ok(r) => r,
-                Err(e) => {
+            let sent = tokio::select! {biased;
+                _=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),
+                r=tokio::time::timeout(self.header_timeout,self.client.post(&endpoint).bearer_auth(secret).json(&payload).send())=>r
+            };
+            let mut response = match sent {
+                Err(_) => {
+                    let mut e=error("responseStartTimeout",&format!("请求已发出，{}秒内未收到接口响应头；无法确认服务端处理情况，未自动重试",self.header_timeout.as_secs()));
+                    e.retryable = true;
+                    return Err(e);
+                }
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
                     drop(permit);
-                    if attempts == 1
-                        && context.allow_transient_retry
-                        && (e.is_connect() || e.is_timeout())
-                    {
+                    if e.is_connect() && attempts == 1 && context.allow_transient_retry {
                         tokio::select! {_=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),_=tokio::time::sleep(Duration::from_secs(1))=>{}}
                         continue;
                     }
-                    let mut err = error(
-                        if e.is_timeout() {
-                            "timeout"
-                        } else {
-                            "connection"
-                        },
-                        if e.is_timeout() {
-                            "模型请求超时"
-                        } else {
-                            "模型连接失败，请检查地址或网络"
-                        },
-                    );
+                    let mut err = if e.is_connect() && e.is_timeout() {
+                        error(
+                            "connectionTimeout",
+                            "建立模型连接超时（15秒，含TLS握手），请检查网络或接口地址",
+                        )
+                    } else if e.is_timeout() {
+                        error(
+                            "responseStartTimeout",
+                            "请求已发出，但等待接口响应头超时；未自动重试",
+                        )
+                    } else {
+                        error("connection", "模型连接失败，请检查地址或网络")
+                    };
                     err.retryable = e.is_connect() || e.is_timeout();
                     return Err(err);
                 }
@@ -304,52 +343,87 @@ impl Gateway {
                 ));
             }
             let mut bytes = Vec::new();
+            let budget = if request.json_mode {
+                self.generation_timeout
+            } else {
+                self.header_timeout
+            };
+            let deadline = tokio::time::Instant::now() + budget;
             loop {
-                let chunk = tokio::select! {biased;_=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),r=response.chunk()=>r};
-                let chunk = match chunk {
-                    Ok(chunk) => chunk,
-                    Err(e) => {
-                        drop(permit);
-                        if e.is_timeout() && attempts == 1 && context.allow_transient_retry {
-                            tokio::select! {_=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),_=tokio::time::sleep(Duration::from_secs(1))=>{}}
-                            continue 'attempt;
-                        }
-                        let mut err = error(
-                            if e.is_timeout() {
-                                "timeout"
-                            } else {
-                                "responseRead"
-                            },
-                            if e.is_timeout() {
-                                "模型请求超时"
-                            } else {
-                                "模型响应读取失败"
-                            },
-                        );
+                let received = tokio::select! {biased;
+                    _=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),
+                    r=tokio::time::timeout_at(deadline,response.chunk())=>r
+                };
+                let chunk = match received {
+                    Err(_) => {
+                        let mut e=error("generationTimeout",&format!("接口已返回响应头，等待生成/接收完整报告超时（{}秒）；未自动重试，避免重复调用",budget.as_secs()));
+                        e.retryable = true;
+                        return Err(e);
+                    }
+                    Ok(Ok(c)) => c,
+                    Ok(Err(e)) => {
+                        let mut err = if e.is_timeout() {
+                            error("generationTimeout","接口已返回响应头，但等待生成/接收完整报告超时；未自动重试，避免重复调用")
+                        } else {
+                            error("responseRead", "接口已响应，但完整报告读取失败；未自动重试")
+                        };
                         err.retryable = e.is_timeout();
                         return Err(err);
                     }
                 };
-                let Some(chunk) = chunk else {
-                    break;
-                };
+                let Some(chunk) = chunk else { break };
                 if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
                     return Err(error("responseTooLarge", "模型响应超过2MB"));
                 }
                 bytes.extend_from_slice(&chunk);
             }
             drop(permit);
+            context.record(CallEvent::ResponseCompleted(attempts))?;
             let value: serde_json::Value = serde_json::from_slice(&bytes)
                 .map_err(|_| error("protocol", "模型响应不是兼容的 JSON 格式"))?;
-            let content = value
+            let tool_content = if let Some(calls) = value
+                .pointer("/choices/0/message/tool_calls")
+                .and_then(|v| v.as_array())
+                .filter(|v| !v.is_empty())
+            {
+                let approved = tool.and_then(|t| t["name"].as_str());
+                if calls.len() != 1
+                    || calls[0]["type"] != "function"
+                    || calls[0].pointer("/function/name").and_then(|v| v.as_str()) != approved
+                    || approved.is_none()
+                {
+                    return Err(error(
+                        "protocol",
+                        "报告响应包含未知或多个工具调用，无法作为完整报告",
+                    ));
+                }
+                Some(
+                    calls[0]
+                        .pointer("/function/arguments")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| error("protocol", "报告工具未返回有效参数文字"))?,
+                )
+            } else {
+                None
+            };
+            let content = tool_content.or_else(||value
                 .pointer("/choices/0/message/content")
                 .and_then(|v| v.as_str())
-                .filter(|s| !s.trim().is_empty())
-                .ok_or_else(|| error("protocol", "模型未返回可用文本，请核对兼容接口"))?;
+                .filter(|s| !s.trim().is_empty()))
+                .ok_or_else(|| {
+                    let finish=value.pointer("/choices/0/finish_reason").and_then(|v|v.as_str()).filter(|s|["length","stop","content_filter","tool_calls","function_call","repetition_truncation"].contains(s)).unwrap_or("unknown");
+                    let completed=value.pointer("/usage/completion_tokens").and_then(|v|v.as_u64());
+                    let reasoning=value.pointer("/usage/completion_tokens_details/reasoning_tokens").and_then(|v|v.as_u64());
+                    error("protocol",&format!("接口已完整响应但没有报告正文（finish_reason={finish}，completion_tokens={completed:?}，reasoning_tokens={reasoning:?}）；{}",if finish=="length"{"生成达到token上限，可能只完成思考；未自动重试"}else{"模型没有提供兼容的文本内容；未自动重试"}))
+                })?;
             return Ok(CompletionResponse {
                 content: content.into(),
                 usage: value.get("usage").filter(|v| v.is_object()).cloned(),
                 attempts,
+                finish_reason: value
+                    .pointer("/choices/0/finish_reason")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
             });
         }
     }
@@ -377,6 +451,8 @@ mod tests {
             }],
             max_tokens: 16,
             disable_thinking: false,
+            json_mode: false,
+            structured_tool: None,
         }
     }
     fn context() -> CallContext {
@@ -385,6 +461,89 @@ mod tests {
             allow_transient_retry: true,
             on_event: None,
         }
+    }
+    #[tokio::test]
+    async fn schema_tool_arguments_are_report_data_and_unexpected_calls_are_rejected() {
+        let body = r#"{"choices":[{"finish_reason":"tool_calls","message":{"content":null,"tool_calls":[{"type":"function","function":{"name":"return_stock_report","arguments":"{\"overview\":\"ok\"}"}}]}}]}"#;
+        let (url, seen, server) = serve(vec![(200, body.into())]).await;
+        let mut cfg = config(url);
+        cfg.provider = "xiaomi-mimo".into();
+        cfg.model = "mimo-v2.6-flash".into();
+        let mut input = serde_json::to_value(request()).unwrap();
+        input["json_mode"] = serde_json::json!(true);
+        input["structured_tool"] = serde_json::json!({"name":"return_stock_report","parameters":{"type":"object","properties":{"overview":{"type":"string"}},"required":["overview"]}});
+        let req: CompletionRequest = serde_json::from_value(input).unwrap();
+        let result = Gateway::new()
+            .unwrap()
+            .complete(&cfg, "fixture-key", &req, &context())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(result.content, r#"{"overview":"ok"}"#);
+        let payload: serde_json::Value =
+            serde_json::from_str(seen.lock().unwrap()[0].split("\r\n\r\n").nth(1).unwrap())
+                .unwrap();
+        assert_eq!(
+            payload["tools"][0]["function"]["name"],
+            "return_stock_report"
+        );
+        assert_eq!(payload["thinking"]["type"], "disabled");
+        assert_eq!(payload["tool_choice"], "auto");
+        assert!(payload.get("response_format").is_none());
+        let (url, _, server) = serve(vec![(
+            200,
+            body.replace("return_stock_report", "unexpected_tool"),
+        )])
+        .await;
+        cfg.base_url = url;
+        assert!(Gateway::new()
+            .unwrap()
+            .complete(&cfg, "fixture-key", &req, &context())
+            .await
+            .is_err());
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn empty_body_response_reports_provider_finish_and_token_usage() {
+        let(url,_,server)=serve(vec![(200,r#"{"choices":[{"finish_reason":"length","message":{"content":null,"reasoning_content":"thinking"}}],"usage":{"completion_tokens":8192,"completion_tokens_details":{"reasoning_tokens":8192}}}"#.into())]).await;
+        let err = Gateway::new()
+            .unwrap()
+            .complete(&config(url), "fixture-key", &request(), &context())
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert!(
+            err.message.contains("length") && err.message.contains("8192"),
+            "{}",
+            err.message
+        );
+    }
+    #[tokio::test]
+    async fn mimo_json_mode_and_finish_reason_are_preserved() {
+        let (url,seen,server)=serve(vec![(200,r#"{"choices":[{"finish_reason":"length","message":{"content":"{\"reportVersion\":2}"}}]}"#.into())]).await;
+        let mut c = config(url);
+        c.provider = "xiaomi-mimo".into();
+        c.model = "mimo-v2.6-flash".into();
+        let mut v = serde_json::to_value(request()).unwrap();
+        v["json_mode"] = serde_json::json!(true);
+        let req: CompletionRequest = serde_json::from_value(v).unwrap();
+        let result = Gateway::new()
+            .unwrap()
+            .complete(&c, "fixture-key", &req, &context())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let calls = seen.lock().unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(calls[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            body["response_format"],
+            serde_json::json!({"type":"json_object"})
+        );
+        assert_eq!(
+            serde_json::to_value(result).unwrap()["finishReason"],
+            "length"
+        );
     }
     #[tokio::test]
     async fn mimo_uses_completion_tokens_and_disables_thinking_only_for_test() {
@@ -559,7 +718,7 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 2);
     }
     #[tokio::test(start_paused = true)]
-    async fn timeout_120s_and_retry_once() {
+    async fn headers_timeout_60s_does_not_resend() {
         use std::sync::{
             atomic::{AtomicU32, Ordering},
             Arc,
@@ -579,7 +738,10 @@ mod tests {
                 let n = n.clone();
                 tokio::spawn(async move {
                     let mut b = [0; 4096];
-                    let _ = socket.read(&mut b).await;
+                    // An accepted socket with EOF is not a submitted model request.
+                    if socket.read(&mut b).await.unwrap_or(0) == 0 {
+                        return;
+                    }
                     c.fetch_add(1, Ordering::SeqCst);
                     n.notify_one();
                     tokio::time::sleep(Duration::from_secs(1000)).await;
@@ -594,17 +756,198 @@ mod tests {
                 .await
         });
         notify.notified().await;
-        tokio::time::advance(Duration::from_secs(119)).await;
+        tokio::time::advance(Duration::from_secs(59)).await;
         assert!(!run.is_finished());
         tokio::time::advance(Duration::from_secs(2)).await;
-        notify.notified().await;
-        tokio::time::advance(Duration::from_secs(121)).await;
+
         let err = run.await.unwrap().unwrap_err();
-        assert_eq!(err.code, "timeout");
-        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(err.code, "responseStartTimeout");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
         server.abort();
     }
 
+    #[tokio::test]
+    async fn accepted_response_timeout_is_generation_timeout_without_resend() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let c = count.clone();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut b = [0; 4096];
+                    let _ = socket.read(&mut b).await;
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n",
+                        )
+                        .await
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    drop(socket);
+                });
+            }
+        });
+        let mut gateway = Gateway::new().unwrap();
+        gateway.client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(30))
+            .build()
+            .unwrap();
+        let err = gateway
+            .complete(&config(url), "fixture-key", &request(), &context())
+            .await
+            .unwrap_err();
+        server.abort();
+        assert_eq!(err.code, "generationTimeout");
+        assert!(err.message.contains("完整"));
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn structured_body_has_a_separate_longer_generation_budget() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut b = [0; 4096];
+            let _ = socket.read(&mut b).await;
+            let body = r#"{"choices":[{"finish_reason":"stop","message":{"content":"ok"}}]}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(180)).await;
+            socket.write_all(body.as_bytes()).await.unwrap();
+        });
+        let mut gateway = Gateway::new().unwrap();
+        assert_eq!(gateway.header_timeout, Duration::from_secs(60));
+        assert_eq!(gateway.generation_timeout, Duration::from_secs(300));
+        gateway.header_timeout = Duration::from_millis(100);
+        gateway.generation_timeout = Duration::from_secs(1);
+        let mut req = request();
+        req.json_mode = true;
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            gateway.complete(&config(url), "fixture-key", &req, &context()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.content, "ok");
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn generation_deadline_and_cancellation_are_bounded_without_retry() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        for cancel_at_end in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/v1", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut b = [0; 4096];
+                let _ = socket.read(&mut b).await;
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                drop(socket);
+            });
+            let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+            let n = notify.clone();
+            let token = CancellationToken::new();
+            let ctx = CallContext {
+                cancel: token.clone(),
+                allow_transient_retry: true,
+                on_event: Some(std::sync::Arc::new(move |e| {
+                    if matches!(e, CallEvent::HeadersReceived(_)) {
+                        n.notify_one()
+                    }
+                    Ok(())
+                })),
+            };
+            let mut req = request();
+            req.json_mode = true;
+            let mut gateway = Gateway::new().unwrap();
+            assert_eq!(gateway.generation_timeout, Duration::from_secs(300));
+            gateway.generation_timeout = Duration::from_millis(60);
+            let run = tokio::spawn(async move {
+                gateway
+                    .complete(&config(url), "fixture-key", &req, &ctx)
+                    .await
+            });
+            tokio::time::timeout(Duration::from_secs(2), notify.notified())
+                .await
+                .unwrap();
+            if cancel_at_end {
+                token.cancel()
+            }
+            let err = tokio::time::timeout(Duration::from_secs(2), run)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(
+                err.code,
+                if cancel_at_end {
+                    "cancelled"
+                } else {
+                    "generationTimeout"
+                }
+            );
+            server.abort();
+        }
+    }
+    #[tokio::test]
+    async fn tls_connection_timeout_is_distinct_from_generation_timeout() {
+        use tokio::{io::AsyncReadExt, net::TcpListener};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("https://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut b = [0; 4096];
+            let _ = socket.read(&mut b).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            drop(socket);
+        });
+        let mut gateway = Gateway::new().unwrap();
+        gateway.client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(40))
+            .build()
+            .unwrap();
+        let mut ctx = context();
+        ctx.allow_transient_retry = false;
+        let err = tokio::time::timeout(
+            Duration::from_secs(2),
+            gateway.complete(&config(url), "fixture-key", &request(), &ctx),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        server.abort();
+        assert_eq!(err.code, "connectionTimeout");
+        assert!(err.message.contains("TLS"));
+    }
     #[test]
     fn retry_after_http_date_is_respected() {
         assert_eq!(retry_delay(Some("120"), 0), Duration::from_secs(120));
@@ -620,7 +963,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn body_timeout_retries_once_and_reports_timeout() {
+    async fn body_timeout_does_not_resend_after_headers() {
         use std::sync::{
             atomic::{AtomicU32, Ordering},
             Arc,
@@ -676,6 +1019,8 @@ mod tests {
                 .build()
                 .unwrap(),
             scheduler: Scheduler::new(),
+            header_timeout: Duration::from_secs(60),
+            generation_timeout: Duration::from_secs(300),
         };
         let run = tokio::spawn(async move {
             gateway
@@ -686,9 +1031,9 @@ mod tests {
             .await
             .unwrap();
         let err = run.await.unwrap().unwrap_err();
-        assert_eq!(err.code, "timeout");
+        assert_eq!(err.code, "generationTimeout");
         assert!(err.retryable);
-        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
         server.abort();
     }
 

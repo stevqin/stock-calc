@@ -42,6 +42,11 @@ export interface GroupRef {
   memberIds: string[];
 }
 export interface StartRequest {
+  executionPolicy?: {
+    preference: string;
+    reservePercent: number;
+    tPercent: number;
+  };
   requestId: string;
   securities: SecurityRef[];
   group: GroupRef | null;
@@ -76,12 +81,24 @@ export interface Snapshot {
   ruleVersions: unknown;
 }
 export interface IndependentReport {
+  executionPlan?: unknown;
   id: string;
   snapshotId: string;
   modelSnapshot: ModelConfig;
   windows: unknown;
   claims: unknown;
   rawOutput: string;
+  outputs?: Array<{
+    role: "independent" | "repair";
+    rawOutput: string;
+    validation: {
+      valid: boolean;
+      error?: string | null;
+      finishReason?: string | null;
+    };
+    usage?: unknown;
+    attempts?: number;
+  }>;
   validation: unknown;
   usage: unknown | null;
 }
@@ -99,6 +116,7 @@ export interface SummaryVersion {
 export interface TaskDetail {
   id: string;
   parentId: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   status: TaskStatus;
   securitySnapshots: Snapshot[];
@@ -111,6 +129,7 @@ export interface TaskDetail {
   errors: AiError[];
 }
 export interface HistoryQuery {
+  trashed?: boolean;
   securityId?: string;
   dateFrom?: string;
   dateTo?: string;

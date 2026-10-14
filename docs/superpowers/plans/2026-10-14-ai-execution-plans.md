@@ -1,0 +1,19 @@
+# Concrete execution proposals and conclusion-first reports
+
+User scope: clearer price/quantity/entry/reduction conclusions, loss-position handling, and a report view that prioritizes decisions over diagnostics. User selected retain a core position and prioritize T trades. Existing authorization covers implementation, real model QA, packaging and launch.
+
+Default visible policy: T first, reserve 50% of the original holding rounded to an order unit, preferred T batch 25% (at least one order unit if the free holding allows it). Both percentages are editable in collapsed settings, and frozen into each request. They are planning parameters, not broker instructions.
+
+New frozen execution evidence contains verified price anchors from quote/unadjusted history and the local diluted cost (clearly labeled as cost, not technical support), supported order quantities/ticks, fee profile, cash quality, current and target-session sell capacity, and policy. Unsupported instruments, missing fees/account evidence, stale inputs and missing price anchors retain explicit blocked/no-step scenarios. No artificial price targets or broker orders.
+
+Each new independent report adds executionPlan: a concise decision, preferredScenario, and fixed scenarios tRoundTrip/riskReduction/entry. Scenarios have status, reason, invalidation, observed price anchors and zero to two concrete steps. Steps select known low/high price anchor IDs, exact quantity and an explicit dependency. T is sell-before-buy with equal quantities; buy requires actual sell fill and confirmed broker cash. Entry uses existing cash. Alternatives are never added together.
+
+Native Decimal arithmetic mirrors calculator.ts fee rounding (positive half-up to cents), validates ticks/lots, available/reserved shares, both legs, budget, limits and fee coverage, and enriches stored proposals with cash ranges, fees, remaining position/available quantity and diluted cost. Selling below diluted cost can increase remaining diluted cost; show this honestly. Zero but initialized cash may fund a T buy only through a confirmed prior sale; anomalies/unknown cash remain blocked. Same-day T+1 buys are not newly sellable. After-close plans label next trading session and broker confirmation.
+
+Summary selects a complete validated execution plan from a report and an existing scenario. It cannot rewrite price/quantity/fee numbers or mix legs from different reports. Old snapshots/reports remain compatible without execution fields; new collection marks executionVersion=1. First/repair outputs remain retained.
+
+View: compact management/date line, brief primary decision, core/T limits and a concrete scenario step table. Primary and alternative scenarios are tabs, with after-fill effects explicit. Five categories become compact tabs with reasons/conditions collapsed. Account/trades, model comparison, raw outputs, sources, trace and settings default closed when viewing a finished report; running trace remains open. Existing palette/system fonts; tabular numeric prices/quantities are the signature. Responsive at desktop and narrow widths, preserve keyboard focus and accessible controls.
+
+Sequence: red tests for fee/quantity/T/budget/IDs/old data and view collapse; implement execution calculator/evidence/optional policy and report fields; integrate schema and strict selection; implement report view; full frontend/Rust/type/build tests; browser screenshots; independent review; two real Flash+Pro rounds on the latest saved snapshot with new frozen execution evidence; package and run 0.9.4, verify account/model data and preserve user history.
+
+Sources: Shenzhen exchange main-board order quantities https://investor.szse.cn/knowledge/t20230308_599142.html ; Shanghai 2026 rules https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml ; exact fee semantics are the user's frozen fee profile and src/core/calculator.ts, not generic skill defaults.

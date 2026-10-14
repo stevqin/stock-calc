@@ -78,6 +78,8 @@ pub struct StartRequest {
     pub group: Option<GroupRef>,
     pub participant_ids: Vec<String>,
     pub summary_model_id: String,
+    #[serde(default)]
+    pub execution_policy: Option<super::execution::Policy>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,6 +142,10 @@ pub struct IndependentReport {
     pub windows: Value,
     pub claims: Value,
     pub raw_output: String,
+    #[serde(default)]
+    pub execution_plan: Option<Value>,
+    #[serde(default)]
+    pub outputs: Vec<Value>,
     pub validation: Value,
     pub usage: Option<Value>,
 }
@@ -161,6 +167,8 @@ pub struct SummaryVersion {
 pub struct TaskDetail {
     pub id: String,
     pub parent_id: Option<String>,
+    #[serde(default)]
+    pub deleted_at: Option<String>,
     pub created_at: String,
     pub status: TaskStatus,
     pub security_snapshots: Vec<Snapshot>,
@@ -175,6 +183,8 @@ pub struct TaskDetail {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistoryQuery {
+    #[serde(default)]
+    pub trashed: bool,
     pub security_id: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,

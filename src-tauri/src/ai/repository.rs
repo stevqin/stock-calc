@@ -80,7 +80,7 @@ fn rows<T: DeserializeOwned>(db: &Connection, sql: &str, id: &str) -> AiResult<V
 pub fn get_task(db: &Connection, id: &str) -> AiResult<TaskDetail> {
     let value:Option<Vec<String>>=db.query_row("SELECT id,COALESCE(parent_id,''),created_at,status,request_payload,progress,call_attempts,group_summaries,errors FROM ai_tasks WHERE id=?1",[id],|r|(0..9).map(|i|r.get::<_,String>(i)).collect()).optional().map_err(|_|AiError::storage())?;
     let v = value.ok_or_else(|| AiError::new("notFound", "分析记录不存在"))?;
-    Ok(TaskDetail { id:v[0].clone(),parent_id:if v[1].is_empty(){None}else{Some(v[1].clone())},created_at:v[2].clone(),status:decode(&v[3])?,request_snapshot:decode(&v[4])?,progress:decode(&v[5])?,call_attempts:decode(&v[6])?,group_summary_versions:decode(&v[7])?,errors:decode(&v[8])?,security_snapshots:rows(db,"SELECT s.payload FROM ai_snapshots s JOIN ai_task_snapshots a ON a.snapshot_id=s.id WHERE a.task_id=?1 ORDER BY s.id",id)?,reports:rows(db,"SELECT payload FROM ai_reports WHERE task_id=?1 ORDER BY rowid",id)?,summary_versions:rows(db,"SELECT payload FROM ai_summaries WHERE task_id=?1 ORDER BY version,rowid",id)? })
+    Ok(TaskDetail { deleted_at:db.query_row("SELECT deleted_at FROM ai_task_trash WHERE task_id=?1",[id],|r|r.get(0)).optional().map_err(|_|AiError::storage())?, id:v[0].clone(),parent_id:if v[1].is_empty(){None}else{Some(v[1].clone())},created_at:v[2].clone(),status:decode(&v[3])?,request_snapshot:decode(&v[4])?,progress:decode(&v[5])?,call_attempts:decode(&v[6])?,group_summary_versions:decode(&v[7])?,errors:decode(&v[8])?,security_snapshots:rows(db,"SELECT s.payload FROM ai_snapshots s JOIN ai_task_snapshots a ON a.snapshot_id=s.id WHERE a.task_id=?1 ORDER BY s.id",id)?,reports:rows(db,"SELECT payload FROM ai_reports WHERE task_id=?1 ORDER BY rowid",id)?,summary_versions:rows(db,"SELECT payload FROM ai_summaries WHERE task_id=?1 ORDER BY version,rowid",id)? })
 }
 pub fn save_snapshot(db: &mut Connection, task_id: &str, snapshot: &Snapshot) -> AiResult<()> {
     validate_security(&snapshot.security)?;
@@ -273,9 +273,9 @@ pub fn list_history(db: &Connection, q: &HistoryQuery) -> AiResult<HistoryPage> 
         }
     }
     let status = q.status.as_ref().map(encode).transpose()?;
-    let mut stmt=db.prepare("SELECT id,seq,request_payload FROM ai_tasks WHERE (?1 IS NULL OR seq<?1) AND (?2 IS NULL OR created_at>=?2) AND (?3 IS NULL OR created_at<?3) AND (?4 IS NULL OR status=?4) ORDER BY seq DESC").map_err(|_|AiError::storage())?;
+    let mut stmt=db.prepare("SELECT id,seq,request_payload FROM ai_tasks WHERE (NOT ?5 OR parent_id IS NULL) AND EXISTS(SELECT 1 FROM ai_task_trash WHERE task_id=ai_tasks.id)=?5 AND (?1 IS NULL OR seq<?1) AND (?2 IS NULL OR created_at>=?2) AND (?3 IS NULL OR created_at<?3) AND (?4 IS NULL OR status=?4) ORDER BY seq DESC").map_err(|_|AiError::storage())?;
     let mut rows = stmt
-        .query(params![cursor, start, end, status])
+        .query(params![cursor, start, end, status, q.trashed])
         .map_err(|_| AiError::storage())?;
     let mut found = Vec::new();
     while let Some(r) = rows.next().map_err(|_| AiError::storage())? {
@@ -307,18 +307,50 @@ pub fn list_history(db: &Connection, q: &HistoryQuery) -> AiResult<HistoryPage> 
         .collect::<AiResult<Vec<_>>>()?;
     Ok(HistoryPage { items, next_cursor })
 }
-pub fn delete_task(db: &mut Connection, task_id: &str) -> AiResult<()> {
-    let tx = db.transaction().map_err(|_| AiError::storage())?;
-    let task = get_task(&tx, task_id)?;
+pub fn managed_task_ids(db: &Connection, task_id: &str) -> AiResult<Vec<String>> {
+    let mut stmt=db.prepare("WITH RECURSIVE members AS (SELECT id FROM ai_tasks WHERE id=?1 UNION ALL SELECT t.id FROM ai_tasks t JOIN members m ON t.parent_id=m.id) SELECT id FROM members").map_err(|_|AiError::storage())?;
+    let rows = stmt
+        .query_map([task_id], |r| r.get::<_, String>(0))
+        .map_err(|_| AiError::storage())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|_| AiError::storage())
+}
+fn check_managed_task(db: &Connection, task_id: &str) -> AiResult<TaskDetail> {
+    let task = get_task(db, task_id)?;
     if task.status.active() {
         return Err(invalid("请先取消正在运行的分析"));
     }
     if task.parent_id.is_some() {
         return Err(invalid("请通过整批任务管理此报告"));
     }
-    let active:i64=tx.query_row("WITH RECURSIVE children AS (SELECT id,status FROM ai_tasks WHERE parent_id=?1 UNION ALL SELECT t.id,t.status FROM ai_tasks t JOIN children c ON t.parent_id=c.id) SELECT COUNT(*) FROM children WHERE status IN ('\"pending\"','\"collecting\"','\"analyzing\"','\"summarizing\"')",[task_id],|r|r.get(0)).map_err(|_|AiError::storage())?;
+    let active:i64=db.query_row("WITH RECURSIVE children AS (SELECT id,status FROM ai_tasks WHERE parent_id=?1 UNION ALL SELECT t.id,t.status FROM ai_tasks t JOIN children c ON t.parent_id=c.id) SELECT COUNT(*) FROM children WHERE status IN ('\"pending\"','\"collecting\"','\"analyzing\"','\"summarizing\"')",[task_id],|r|r.get(0)).map_err(|_|AiError::storage())?;
     if active > 0 {
         return Err(invalid("请先取消批量分析"));
+    }
+    Ok(task)
+}
+pub fn delete_task(db: &mut Connection, task_id: &str) -> AiResult<()> {
+    let tx = db.transaction().map_err(|_| AiError::storage())?;
+    check_managed_task(&tx, task_id)?;
+    tx.execute("WITH RECURSIVE members AS (SELECT id FROM ai_tasks WHERE id=?1 UNION ALL SELECT t.id FROM ai_tasks t JOIN members m ON t.parent_id=m.id) INSERT OR IGNORE INTO ai_task_trash SELECT id,?2 FROM members",params![task_id,chrono::Utc::now().to_rfc3339()]).map_err(|_|AiError::storage())?;
+    tx.commit().map_err(|_| AiError::storage())?;
+    Ok(())
+}
+pub fn restore_task(db: &mut Connection, task_id: &str) -> AiResult<()> {
+    let tx = db.transaction().map_err(|_| AiError::storage())?;
+    let task = check_managed_task(&tx, task_id)?;
+    if task.deleted_at.is_none() {
+        return Err(invalid("报告不在回收站"));
+    }
+    tx.execute("WITH RECURSIVE members AS (SELECT id FROM ai_tasks WHERE id=?1 UNION ALL SELECT t.id FROM ai_tasks t JOIN members m ON t.parent_id=m.id) DELETE FROM ai_task_trash WHERE task_id IN (SELECT id FROM members)",[task_id]).map_err(|_|AiError::storage())?;
+    tx.commit().map_err(|_| AiError::storage())?;
+    Ok(())
+}
+pub fn purge_task(db: &mut Connection, task_id: &str) -> AiResult<()> {
+    let tx = db.transaction().map_err(|_| AiError::storage())?;
+    let task = check_managed_task(&tx, task_id)?;
+    if task.deleted_at.is_none() {
+        return Err(invalid("请先将报告移入回收站"));
     }
     tx.execute("DELETE FROM ai_tasks WHERE id=?1", [task_id])
         .map_err(|_| AiError::storage())?;
@@ -352,6 +384,7 @@ mod tests {
             group: None,
             participant_ids: vec!["model-1".into()],
             summary_model_id: "model-1".into(),
+            execution_policy: None,
         }
     }
     fn fixture() -> Snapshot {
@@ -375,6 +408,8 @@ mod tests {
             windows: json!({}),
             claims: json!([]),
             raw_output: "{}".into(),
+            execution_plan: None,
+            outputs: vec![],
             validation: json!({"valid":true}),
             usage: None,
         }
@@ -391,6 +426,84 @@ mod tests {
             disagreements: json!([]),
             validation: json!({"valid":true}),
         }
+    }
+    #[test]
+    fn trash_hides_and_restores_all_versions_then_purge_removes_owned_data() {
+        let mut db = setup();
+        let t = create_task(&mut db, &request("trash")).unwrap();
+        save_snapshot(&mut db, &t.id, &fixture()).unwrap();
+        save_report(&mut db, &t.id, &report()).unwrap();
+        append_summary(&mut db, &t.id, &summary(1)).unwrap();
+        set_status(&db, &t.id, TaskStatus::Completed).unwrap();
+        delete_task(&mut db, &t.id).unwrap();
+        assert!(list_history(&db, &HistoryQuery::default())
+            .unwrap()
+            .items
+            .is_empty());
+        assert_eq!(
+            list_history(
+                &db,
+                &HistoryQuery {
+                    trashed: true,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+            1
+        );
+        assert_eq!(get_task(&db, &t.id).unwrap().summary_versions.len(), 1);
+        restore_task(&mut db, &t.id).unwrap();
+        assert_eq!(
+            list_history(&db, &HistoryQuery::default())
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+        assert!(purge_task(&mut db, &t.id).is_err());
+        delete_task(&mut db, &t.id).unwrap();
+        purge_task(&mut db, &t.id).unwrap();
+        assert!(get_task(&db, &t.id).is_err());
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM ai_evidence", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+    #[test]
+    fn trash_manages_batch_roots_and_rejects_active_children() {
+        let mut db = setup();
+        let a = create_task(&mut db, &request("root")).unwrap();
+        let b = create_task(&mut db, &request("child")).unwrap();
+        db.execute(
+            "UPDATE ai_tasks SET parent_id=?1 WHERE id=?2",
+            params![a.id, b.id],
+        )
+        .unwrap();
+        set_status(&db, &a.id, TaskStatus::Completed).unwrap();
+        assert!(delete_task(&mut db, &a.id).is_err());
+        set_status(&db, &b.id, TaskStatus::Completed).unwrap();
+        assert!(delete_task(&mut db, &b.id).is_err());
+        delete_task(&mut db, &a.id).unwrap();
+        assert!(get_task(&db, &b.id).unwrap().deleted_at.is_some());
+        assert_eq!(
+            list_history(
+                &db,
+                &HistoryQuery {
+                    trashed: true,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+            1
+        );
+        restore_task(&mut db, &a.id).unwrap();
+        assert!(get_task(&db, &b.id).unwrap().deleted_at.is_none());
     }
     #[test]
     fn migration_preserves_account_and_history() {
@@ -454,6 +567,7 @@ mod tests {
         set_status(&db, &a.id, TaskStatus::Completed).unwrap();
         set_status(&db, &b.id, TaskStatus::Completed).unwrap();
         delete_task(&mut db, &a.id).unwrap();
+        purge_task(&mut db, &a.id).unwrap();
         assert_eq!(
             get_task(&db, &b.id).unwrap().security_snapshots[0].evidence[0].id,
             "evidence-1"
@@ -465,6 +579,7 @@ mod tests {
             1
         );
         delete_task(&mut db, &b.id).unwrap();
+        purge_task(&mut db, &b.id).unwrap();
         assert_eq!(
             db.query_row("SELECT COUNT(*) FROM ai_evidence", [], |r| r
                 .get::<_, i64>(0))

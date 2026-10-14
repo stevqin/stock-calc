@@ -338,7 +338,9 @@ pub fn run() {
             ai::commands::ai_list_model_versions,
             ai::commands::ai_get_task,
             ai::commands::ai_list_history,
-            ai::commands::ai_delete_task
+            ai::commands::ai_delete_task,
+            ai::commands::ai_restore_task,
+            ai::commands::ai_purge_task
         ])
         .run(tauri::generate_context!())
         .expect("desktop runtime");

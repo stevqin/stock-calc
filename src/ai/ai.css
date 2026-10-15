@@ -495,3 +495,342 @@
     gap: 8px 12px;
   }
 }
+/* One ordered action list: prices and quantities share the same reading line. */
+.ai-action-sheet {
+  margin: 14px 0;
+  border: 1px solid #cbd9e8;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.ai-action-now {
+  padding: 14px 18px;
+  background: #eef4fa;
+}
+.ai-action-now > strong {
+  font-size: 19px;
+  color: #244d76;
+}
+.ai-action-now p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ai-action-row {
+  display: grid;
+  grid-template-columns: 90px minmax(120px, 1fr) 100px minmax(180px, 2fr);
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-top: 1px solid #dce5ef;
+  border-left: 4px solid transparent;
+}
+.ai-action-sell {
+  border-left-color: #b07835;
+}
+.ai-action-buy {
+  border-left-color: #368b79;
+}
+.ai-action-order {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 17px;
+}
+.ai-action-order b {
+  color: #61758a;
+  font-size: 12px;
+}
+.ai-action-price > strong {
+  display: block;
+  font-size: 27px;
+  color: #244d76;
+  line-height: 1.3;
+}
+.ai-action-price > span {
+  display: block;
+  color: #61758a;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.ai-action-quantity {
+  font-size: 25px;
+  color: #244d76;
+}
+.ai-action-price small,
+.ai-action-quantity small {
+  font-size: 13px;
+  margin-left: 5px;
+  font-weight: 400;
+}
+.ai-action-condition > small {
+  color: #61758a;
+  font-size: 12px;
+}
+.ai-action-condition p {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+.ai-action-condition > strong {
+  font-size: 12px;
+  color: #9a611f;
+}
+.ai-action-hold {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 12px 18px;
+  border-top: 1px solid #dce5ef;
+}
+.ai-action-hold > strong {
+  font-size: 20px;
+  color: #244d76;
+}
+.ai-action-hold small {
+  font-size: 12px;
+  color: #61758a;
+}
+.ai-action-stop {
+  margin: 0;
+  padding: 12px 18px;
+  background: #fffbf4;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.ai-action-stop strong {
+  margin-right: 10px;
+  color: #9a611f;
+}
+.ai-action-empty {
+  display: flex;
+  gap: 18px;
+  padding: 10px 18px;
+  color: #61758a;
+  font-size: 13px;
+}
+.ai-plan-details > summary {
+  font-weight: 600;
+}
+@media (max-width: 750px) {
+  .ai-action-row {
+    grid-template-columns: 70px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 14px 12px;
+  }
+  .ai-action-condition {
+    grid-column: 1 / -1;
+  }
+  .ai-action-price > strong,
+  .ai-action-quantity {
+    font-size: 23px;
+  }
+  .ai-action-now,
+  .ai-action-hold,
+  .ai-action-stop {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+.ai-level-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+  font-variant-numeric: tabular-nums;
+}
+.ai-level-map > span {
+  display: grid;
+  gap: 3px;
+  background: #eef3f8;
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+.ai-level-map small {
+  color: #61758a;
+  font-size: 11px;
+}
+.ai-signal-conditions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+.ai-signal-conditions > div {
+  background: white;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  padding: 12px;
+}
+.ai-signal-conditions p,
+.ai-operation-trigger p {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 6px 0 0;
+}
+.ai-signal-pending {
+  grid-column: 1/-1;
+  color: #61758a;
+  font-size: 12px;
+}
+.ai-operation-trigger {
+  padding: 12px 0;
+}
+.ai-operation-trigger strong {
+  font-size: 12px;
+  color: #61758a;
+}
+.ai-operation-trigger p + strong {
+  display: block;
+  margin-top: 8px;
+}
+.ai-step-level {
+  display: block;
+  color: #61758a;
+}
+.ai-headline-details {
+  margin: 10px 0;
+}
+@media (max-width: 750px) {
+  .ai-primary-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ai-signal-conditions {
+    grid-template-columns: 1fr;
+  }
+  .ai-primary-actions strong {
+    font-size: 22px;
+  }
+}
+.ai-wait-reasons {
+  border-left: 3px solid #b07835;
+  padding: 10px 14px;
+  background: #fffbf4;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 12px 0;
+}
+.ai-wait-reasons p {
+  margin: 6px 0;
+}
+.ai-wait-reasons small {
+  color: #61758a;
+}
+
+.ai-action-price {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ai-action-price strong small,
+.ai-action-quantity small,
+.ai-action-hold strong small {
+  display: inline;
+}
+
+.ai-action-condition .ai-action-confirmation {
+  font-weight: 400;
+  font-size: 13px;
+  color: #38546f;
+}
+
+/* Compact report views keep analysis legible beside the primary action list. */
+.ai-stock-drawer .ai-report-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0 12px;
+}
+.ai-stock-drawer .ai-report-tabs button {
+  font-size: 13px;
+  padding: 6px 14px;
+  min-height: 32px;
+}
+.ai-stock-drawer .ai-report-tabs button[aria-pressed="true"] {
+  color: #244d76;
+  background: #e5eef9;
+  border-color: #90accd;
+  font-weight: 600;
+}
+.ai-stock-drawer .ai-settings-card {
+  padding: 12px;
+}
+.ai-stock-drawer .ai-execution {
+  padding: 12px;
+}
+.ai-stock-drawer .ai-action-now {
+  padding: 10px 12px;
+}
+.ai-stock-drawer .ai-action-now > strong {
+  font-size: 16px;
+}
+.ai-stock-drawer .ai-action-row {
+  gap: 10px;
+  padding: 10px 12px;
+  grid-template-columns: 76px minmax(110px, 1fr) 80px minmax(170px, 2fr);
+}
+.ai-stock-drawer .ai-action-price > strong {
+  font-size: 22px;
+}
+.ai-stock-drawer .ai-action-quantity {
+  font-size: 20px;
+}
+.ai-stock-drawer .ai-action-order {
+  font-size: 15px;
+}
+.ai-stock-drawer .ai-action-condition p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ai-stock-drawer .ai-action-hold,
+.ai-stock-drawer .ai-action-stop {
+  padding: 9px 12px;
+}
+.ai-stock-drawer .ai-summary-card h3,
+.ai-stock-drawer .ai-v2-section-heading h3 {
+  font-size: 15px;
+}
+.ai-stock-drawer .ai-v2-operation h4 {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ai-stock-drawer .ai-model-support {
+  padding: 10px;
+  margin-top: 8px;
+}
+.ai-stock-drawer .ai-model-report > details > summary {
+  font-size: 13px;
+}
+.ai-stock-drawer .ai-operation-tabs {
+  gap: 5px;
+}
+.ai-stock-drawer .ai-operation-tabs button {
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.ai-branch-warnings,
+.ai-branch-unavailable {
+  font-size: 12px;
+  line-height: 1.6;
+  background: #fffbf4;
+  border-left: 3px solid #b07835;
+  padding: 8px 10px;
+  margin: 10px 0;
+}
+.ai-branch-warnings p {
+  margin: 5px 0;
+}
+@media (max-width: 750px) {
+  .ai-stock-drawer .ai-action-row {
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .ai-stock-drawer .ai-action-price > strong {
+    font-size: 20px;
+  }
+  .ai-stock-drawer .ai-report-tabs button {
+    padding: 6px 10px;
+  }
+}

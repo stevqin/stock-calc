@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 const selected = ref("today");
-const props = defineProps<{ claims: unknown }>();
+import ReportSignals from "./ReportSignals.vue";
+import { readableReportText } from "./reportText";
+const props = defineProps<{
+  claims: unknown;
+  priceLevels?: unknown;
+  signalConditions?: unknown;
+}>();
 const definitions = [
   { type: "today", label: "今日操作", time: "今日 / 下一交易日准备" },
   { type: "week", label: "本周操作", time: "本周剩余交易日 / 复盘" },
@@ -64,23 +70,42 @@ const labels = Object.fromEntries(definitions.map((d) => [d.type, d.label]));
         >
       </div>
       <div class="ai-v2-body">
-        <h4>{{ row.claim.text }}</h4>
-        <details>
+        <p v-if="row.claim.unavailableReason" class="ai-branch-unavailable">
+          <strong>方案不可用</strong> · {{ row.claim.unavailableReason }}
+        </p>
+        <h4 v-else>{{ readableReportText(row.claim.text) }}</h4>
+        <ReportSignals
+          v-if="!row.claim.unavailableReason"
+          :price-levels="priceLevels"
+          :signal-conditions="
+            row.type === 'mediumLongTerm' ? undefined : signalConditions
+          "
+          :reference-text="
+            row.claim.text +
+            ' ' +
+            row.claim.trigger +
+            ' ' +
+            row.claim.invalidation
+          "
+        />
+        <div v-if="!row.claim.unavailableReason" class="ai-operation-trigger">
+          <strong>什么时候考虑操作</strong>
+          <p>{{ readableReportText(row.claim.trigger) }}</p>
+          <strong>什么时候停止</strong>
+          <p>{{ readableReportText(row.claim.invalidation) }}</p>
+        </div>
+        <details v-if="!row.claim.unavailableReason">
           <summary>展开判断、触发条件与资金依据</summary>
-          <p class="ai-v2-reason">{{ row.claim.reason }}</p>
-          <div class="ai-v2-conditions">
-            <div>
-              <small>触发条件</small>
-              <p>{{ row.claim.trigger }}</p>
-            </div>
-            <div>
-              <small>停止 / 失效条件</small>
-              <p>{{ row.claim.invalidation }}</p>
-            </div>
-          </div>
+          <p class="ai-v2-reason">{{ readableReportText(row.claim.reason) }}</p>
           <div class="ai-v2-basis">
-            <p><strong>数量约束：</strong>{{ row.claim.quantityBasis }}</p>
-            <p><strong>资金依据：</strong>{{ row.claim.cashBasis }}</p>
+            <p>
+              <strong>数量约束：</strong
+              >{{ readableReportText(row.claim.quantityBasis) }}
+            </p>
+            <p>
+              <strong>资金依据：</strong
+              >{{ readableReportText(row.claim.cashBasis) }}
+            </p>
           </div>
           <p v-if="row.claim.conflictsWith?.length" class="ai-data-gap">
             与
@@ -93,9 +118,9 @@ const labels = Object.fromEntries(definitions.map((d) => [d.type, d.label]));
             <summary>展开时间、费用与模型依据</summary>
             <dl class="ai-condition-list">
               <dt>适用时间</dt>
-              <dd>{{ row.claim.horizon }}</dd>
+              <dd>{{ readableReportText(row.claim.horizon) }}</dd>
               <dt>费用影响</dt>
-              <dd>{{ row.claim.feeImpact }}</dd>
+              <dd>{{ readableReportText(row.claim.feeImpact) }}</dd>
             </dl>
             <slot name="evidence" :claim="row.claim" />
           </details>

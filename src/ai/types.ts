@@ -95,6 +95,11 @@ export interface IndependentReport {
       valid: boolean;
       error?: string | null;
       finishReason?: string | null;
+      warnings?: Array<{
+        scenario: string;
+        message: string;
+        detail?: string;
+      }> | null;
     };
     usage?: unknown;
     attempts?: number;

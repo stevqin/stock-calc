@@ -35,3 +35,18 @@ describe("五类操作建议", () => {
     expect(w.findAll("details[open]")).toHaveLength(0);
   });
 });
+it("操作建议默认显示明确条件和L价格对照", () => {
+  const w = mount(ReportOperations, {
+    props: {
+      claims,
+      priceLevels: [{ id: "L1", name: "昨收", price: "32.80" }],
+      signalConditions: {
+        stabilization: "L1上方连续两根5分钟K线不创新低。",
+        weakening: "触及L1后连续两根5分钟K线未创新高。",
+      },
+    } as any,
+  });
+  expect(w.get(".ai-signal-conditions").text()).toContain("不创新低");
+  expect(w.get(".ai-level-map").text()).toContain("32.80");
+  expect(w.find(".ai-signal-conditions").element.closest("details")).toBeNull();
+});

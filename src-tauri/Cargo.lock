@@ -3798,7 +3798,7 @@ dependencies = [
 
 [[package]]
 name = "t-calculator"
-version = "0.9.4"
+version = "0.9.8"
 dependencies = [
  "chrono",
  "encoding_rs",

@@ -44,9 +44,15 @@ const isMimo = computed(
       form.baseUrl,
     ),
 );
+const isDeepSeek = computed(
+  () =>
+    form.provider === "deepseek" ||
+    /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(form.baseUrl),
+);
 const versions = computed(() => [
   ...new Set([
     ...remoteVersions.value,
+    ...(isDeepSeek.value ? ["deepseek-flash", "deepseek-v4-pro"] : []),
     ...(isMimo.value
       ? [
           "mimo-v2.6-flash",
@@ -114,6 +120,7 @@ function edit(model?: ModelConfig) {
 }
 function providerChanged() {
   remoteVersions.value = [];
+  if (form.provider === "deepseek") form.baseUrl = "https://api.deepseek.com";
   if (form.provider === "openai") form.baseUrl = "https://api.openai.com/v1";
   if (
     form.provider === "xiaomi-mimo" &&
@@ -282,8 +289,12 @@ onBeforeUnmount(() => {
             <option value="custom">自定义 / OpenAI 兼容接口</option>
             <option value="openai">OpenAI</option>
             <option value="xiaomi-mimo">小米 MiMo</option>
+            <option value="deepseek">DeepSeek</option>
           </select></label
         >
+        <p v-if="isDeepSeek || isMimo" class="ai-muted">
+          分析、汇总、修复与连接测试均会向该服务商明确要求关闭思考，直接生成结果。关闭思考不能保证服务端排队或网络等待一定消失。
+        </p>
         <label
           >API 基础地址<input
             v-model="form.baseUrl"

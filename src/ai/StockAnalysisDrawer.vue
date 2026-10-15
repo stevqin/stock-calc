@@ -31,6 +31,7 @@ const recycleOpen = ref(false),
   deletePending = ref(false),
   historyCursor = ref<string | null>(null);
 const independentChoice = ref("");
+const reportView = ref("operations");
 function evidenceContent(kind: string) {
   try {
     return JSON.parse(
@@ -363,6 +364,7 @@ async function poll(taskId: string, token: number) {
   }
 }
 function watchTask(task: TaskDetail) {
+  reportView.value = "operations";
   setupCollapsed.value = true;
   stop();
   detail.value = task;
@@ -606,8 +608,41 @@ onBeforeUnmount(() => {
           </p>
         </section>
 
+        <nav v-if="detail" class="ai-report-tabs" aria-label="报告视图">
+          <button
+            :aria-pressed="reportView === 'operations'"
+            @click="reportView = 'operations'"
+          >
+            操作清单
+          </button>
+          <button
+            :aria-pressed="reportView === 'summary'"
+            @click="reportView = 'summary'"
+          >
+            综合结论
+          </button>
+          <button
+            :aria-pressed="reportView === 'independent'"
+            @click="reportView = 'independent'"
+          >
+            独立分析
+          </button>
+        </nav>
+        <p
+          v-if="reportView === 'summary' && !currentSummary && !independentView"
+          class="ai-muted"
+        >
+          暂无有效综合结论，请查看独立分析及具体失败原因。
+        </p>
+        <p
+          v-if="reportView === 'independent' && !detail?.reports.length"
+          class="ai-muted"
+        >
+          尚未收到独立报告，请查看下方执行记录。
+        </p>
         <section
           v-if="isV2 && !executionPlan && (currentSummary || independentView)"
+          v-show="reportView === 'operations'"
           class="ai-current-action"
         >
           <small>当前首选与主要约束</small>
@@ -621,10 +656,16 @@ onBeforeUnmount(() => {
         </section>
         <ReportExecutionPlan
           v-if="executionPlan"
+          v-show="reportView === 'operations'"
           :key="currentSummary?.id ?? independentView?.id"
           :plan="executionPlan"
         />
-        <details v-if="snapshot" class="ai-report-context" :open="active">
+        <details
+          v-if="snapshot"
+          v-show="reportView === 'operations'"
+          class="ai-report-context"
+          :open="active"
+        >
           <summary>
             账户与资料依据 · 持仓 {{ frozenPosition?.quantity ?? "未提供" }} ·
             摊薄成本 {{ frozenPosition?.dilutedCost ?? "—" }} · 余额
@@ -737,174 +778,210 @@ onBeforeUnmount(() => {
         </details>
         <section
           v-if="!currentSummary && independentView && isV2"
+          v-show="reportView === 'summary'"
           class="ai-settings-card"
         >
-          <h3>独立模型建议</h3>
-          <label v-if="validReports.length > 1"
-            >查看模型<select v-model="independentChoice">
-              <option v-for="r in validReports" :key="r.id" :value="r.id">
-                {{ r.modelSnapshot.displayName }}
-              </option>
-            </select></label
+          <details
+            data-independent-details
+            :open="reportView === 'summary' || !executionPlan"
           >
-          <p class="ai-data-gap">
-            尚无有效汇总；下方只来自
-            {{ independentView.modelSnapshot.displayName }}。
-          </p>
-          <details>
-            <summary>展开模型总体判断</summary>
-            <p>{{ overview(independentView) }}</p>
-          </details>
-          <ReportOperations :claims="independentView.claims"
-            ><template #evidence="{ claim }"
-              ><details>
-                <summary>引用资料</summary>
-                <pre
-                  v-for="e in snapshot?.evidence.filter((e) =>
-                    arr(claim.evidenceIds).includes(e.id),
-                  )"
-                  :key="e.id"
-                  >{{ e.source }}
-{{ e.content }}</pre>
-              </details></template
-            ></ReportOperations
-          >
-        </section>
-        <section v-if="currentSummary" class="ai-settings-card ai-summary-card">
-          <div class="ai-summary-heading">
-            <h3>综合结论</h3>
-            <select
-              v-if="summaries.length > 1"
-              v-model="summaryId"
-              aria-label="汇总版本"
+            <summary>五类建议与独立分析</summary>
+            <h3>独立模型建议</h3>
+            <label v-if="validReports.length > 1"
+              >查看模型<select v-model="independentChoice">
+                <option v-for="r in validReports" :key="r.id" :value="r.id">
+                  {{ r.modelSnapshot.displayName }}
+                </option>
+              </select></label
             >
-              <option v-for="s in summaries" :key="s.id" :value="s.id">
-                汇总 v{{ s.version }}
-              </option>
-            </select>
-          </div>
-          <small
-            >{{ currentSummary.summaryModelSnapshot.displayName }} · 汇总 v{{
-              currentSummary.version
-            }}</small
-          >
-          <p v-if="validReports.length === 1" class="ai-data-gap">
-            仅有一个有效独立模型，本次汇总不代表多模型共识。
-          </p>
-          <p v-if="active" class="ai-data-gap">
-            正在生成新的汇总，下方仍是已保存版本。
-          </p>
-          <p v-if="!isV2" class="ai-prose">
-            {{ (currentSummary.windows as any).overview }}
-          </p>
-          <ReportOperations v-if="isV2" :claims="currentSummary.keyClaims"
-            ><template #evidence="{ claim }"
-              ><small>{{ agreement(claim) }}</small>
-              <article
-                v-for="row in supportRows(claim)"
-                :key="row.report!.id"
-                class="ai-model-support"
-              >
-                <strong>{{ row.report!.modelSnapshot.displayName }}</strong>
-                <p>{{ row.original.text }}</p>
-                <p>资金依据：{{ row.original.cashBasis }}</p>
-                <p>数量约束：{{ row.original.quantityBasis }}</p>
-                <p>费用：{{ row.original.feeImpact }}</p>
-                <details>
-                  <summary>查看引用资料</summary>
-                  <div
+            <p class="ai-data-gap">
+              尚无有效汇总；下方只来自
+              {{ independentView.modelSnapshot.displayName }}。
+            </p>
+            <details>
+              <summary>展开模型总体判断</summary>
+              <p>{{ overview(independentView) }}</p>
+            </details>
+            <ReportOperations
+              :claims="independentView.claims"
+              :price-levels="(executionPlan as any)?.context?.priceLevels"
+              :signal-conditions="(executionPlan as any)?.signalConditions"
+              ><template #evidence="{ claim }"
+                ><details>
+                  <summary>引用资料</summary>
+                  <pre
                     v-for="e in snapshot?.evidence.filter((e) =>
-                      arr(row.original.evidenceIds).includes(e.id),
+                      arr(claim.evidenceIds).includes(e.id),
                     )"
                     :key="e.id"
-                  >
-                    <strong>{{ e.source }}</strong>
-                    <pre>{{ e.content }}</pre>
-                  </div>
-                </details>
-              </article></template
-            ></ReportOperations
-          >
-          <div class="ai-key-claims">
-            <article
-              v-for="(claim, i) in arr(currentSummary.keyClaims).filter(
-                (c) => !c.operationType,
-              )"
-              :key="i"
-              :class="[
-                'ai-claim',
-                { 'ai-operation-claim': strategyLabels[claim.strategy] },
-              ]"
+                    >{{ e.source }}
+{{ e.content }}</pre>
+                </details></template
+              ></ReportOperations
             >
-              <h4>
-                {{ strategyLabels[claim.strategy] ?? "关键判断 " + (i + 1) }}
-              </h4>
-              <p class="ai-prose">{{ claim.text }}</p>
-              <details>
-                <summary>
-                  展开模型依据 <small>{{ agreement(claim) }}</small
-                  ><ReportTooltip
-                    label="模型依据数量"
-                    text="计数只表示多少个独立模型被引用为该结论提供依据。没有被引用不代表赞同；只有一个有效模型时不构成多模型共识。"
-                  />
-                </summary>
+          </details>
+        </section>
+        <section
+          v-if="currentSummary"
+          v-show="
+            reportView === 'summary' ||
+            (!executionPlan && reportView === 'operations')
+          "
+          class="ai-settings-card ai-summary-card"
+        >
+          <details
+            data-summary-details
+            :open="reportView === 'summary' || !executionPlan"
+          >
+            <summary>五类建议与综合分析</summary>
+            <div class="ai-summary-heading">
+              <h3>综合结论</h3>
+              <select
+                v-if="summaries.length > 1"
+                v-model="summaryId"
+                aria-label="汇总版本"
+              >
+                <option v-for="s in summaries" :key="s.id" :value="s.id">
+                  汇总 v{{ s.version }}
+                </option>
+              </select>
+            </div>
+            <small
+              >{{ currentSummary.summaryModelSnapshot.displayName }} · 汇总 v{{
+                currentSummary.version
+              }}</small
+            >
+            <p v-if="validReports.length === 1" class="ai-data-gap">
+              仅有一个有效独立模型，本次汇总不代表多模型共识。
+            </p>
+            <p v-if="active" class="ai-data-gap">
+              正在生成新的汇总，下方仍是已保存版本。
+            </p>
+            <p v-if="!isV2" class="ai-prose">
+              {{ (currentSummary.windows as any).overview }}
+            </p>
+            <p
+              v-if="
+                arr(currentSummary.keyClaims).some((c) => c.unavailableReason)
+              "
+              class="ai-branch-unavailable"
+            >
+              部分汇总结论引用了不可用的操作方案，已明确标记；其他有效结论保留。
+            </p>
+            <ReportOperations
+              v-if="isV2"
+              :claims="currentSummary.keyClaims"
+              :price-levels="(executionPlan as any)?.context?.priceLevels"
+              :signal-conditions="(executionPlan as any)?.signalConditions"
+              ><template #evidence="{ claim }"
+                ><small>{{ agreement(claim) }}</small>
                 <article
                   v-for="row in supportRows(claim)"
                   :key="row.report!.id"
                   class="ai-model-support"
                 >
-                  <strong>{{ row.report!.modelSnapshot.displayName }}</strong
-                  ><small> · {{ row.report!.modelSnapshot.model }}</small>
-                  <p class="ai-prose">{{ row.original.text }}</p>
-                  <template v-if="strategyLabels[row.original.strategy]"
-                    ><dl class="ai-condition-list">
-                      <dt>触发条件</dt>
-                      <dd>{{ row.original.trigger }}</dd>
-                      <dt>失效条件</dt>
-                      <dd>{{ row.original.invalidation }}</dd>
-                      <dt>数量依据</dt>
-                      <dd>{{ row.original.quantityBasis }}</dd>
-                      <dt>费用影响</dt>
-                      <dd>{{ row.original.feeImpact }}</dd>
-                    </dl></template
-                  >
+                  <strong>{{ row.report!.modelSnapshot.displayName }}</strong>
+                  <p>{{ row.original.text }}</p>
+                  <p>资金依据：{{ row.original.cashBasis }}</p>
+                  <p>数量约束：{{ row.original.quantityBasis }}</p>
+                  <p>费用：{{ row.original.feeImpact }}</p>
                   <details>
-                    <summary>
-                      查看引用资料 ·
-                      {{ arr(row.original.evidenceIds).length }} 项
-                    </summary>
+                    <summary>查看引用资料</summary>
                     <div
                       v-for="e in snapshot?.evidence.filter((e) =>
                         arr(row.original.evidenceIds).includes(e.id),
                       )"
                       :key="e.id"
                     >
-                      <strong>{{ e.source }}</strong
-                      ><small>
-                        ·
-                        {{
-                          availabilityLabels[e.availability] ?? e.availability
-                        }}</small
-                      >
+                      <strong>{{ e.source }}</strong>
                       <pre>{{ e.content }}</pre>
                     </div>
                   </details>
-                </article>
-              </details>
-            </article>
-          </div>
-          <div
-            v-if="arr(currentSummary.disagreements).length"
-            class="ai-disagreements"
-          >
-            <h4>主要分歧</h4>
-            <p v-for="(d, i) in arr(currentSummary.disagreements)" :key="i">
-              {{ d }}
-            </p>
-          </div>
+                </article></template
+              ></ReportOperations
+            >
+            <div class="ai-key-claims">
+              <article
+                v-for="(claim, i) in arr(currentSummary.keyClaims).filter(
+                  (c) => !c.operationType,
+                )"
+                :key="i"
+                :class="[
+                  'ai-claim',
+                  { 'ai-operation-claim': strategyLabels[claim.strategy] },
+                ]"
+              >
+                <h4>
+                  {{ strategyLabels[claim.strategy] ?? "关键判断 " + (i + 1) }}
+                </h4>
+                <p class="ai-prose">{{ claim.text }}</p>
+                <details>
+                  <summary>
+                    展开模型依据 <small>{{ agreement(claim) }}</small
+                    ><ReportTooltip
+                      label="模型依据数量"
+                      text="计数只表示多少个独立模型被引用为该结论提供依据。没有被引用不代表赞同；只有一个有效模型时不构成多模型共识。"
+                    />
+                  </summary>
+                  <article
+                    v-for="row in supportRows(claim)"
+                    :key="row.report!.id"
+                    class="ai-model-support"
+                  >
+                    <strong>{{ row.report!.modelSnapshot.displayName }}</strong
+                    ><small> · {{ row.report!.modelSnapshot.model }}</small>
+                    <p class="ai-prose">{{ row.original.text }}</p>
+                    <template v-if="strategyLabels[row.original.strategy]"
+                      ><dl class="ai-condition-list">
+                        <dt>触发条件</dt>
+                        <dd>{{ row.original.trigger }}</dd>
+                        <dt>失效条件</dt>
+                        <dd>{{ row.original.invalidation }}</dd>
+                        <dt>数量依据</dt>
+                        <dd>{{ row.original.quantityBasis }}</dd>
+                        <dt>费用影响</dt>
+                        <dd>{{ row.original.feeImpact }}</dd>
+                      </dl></template
+                    >
+                    <details>
+                      <summary>
+                        查看引用资料 ·
+                        {{ arr(row.original.evidenceIds).length }} 项
+                      </summary>
+                      <div
+                        v-for="e in snapshot?.evidence.filter((e) =>
+                          arr(row.original.evidenceIds).includes(e.id),
+                        )"
+                        :key="e.id"
+                      >
+                        <strong>{{ e.source }}</strong
+                        ><small>
+                          ·
+                          {{
+                            availabilityLabels[e.availability] ?? e.availability
+                          }}</small
+                        >
+                        <pre>{{ e.content }}</pre>
+                      </div>
+                    </details>
+                  </article>
+                </details>
+              </article>
+            </div>
+            <div
+              v-if="arr(currentSummary.disagreements).length"
+              class="ai-disagreements"
+            >
+              <h4>主要分歧</h4>
+              <p v-for="(d, i) in arr(currentSummary.disagreements)" :key="i">
+                {{ d }}
+              </p>
+            </div>
+          </details>
         </section>
         <section
           v-if="validReports.length"
+          v-show="reportView === 'summary'"
           class="ai-settings-card ai-trend-comparison"
         >
           <details>
@@ -950,16 +1027,19 @@ onBeforeUnmount(() => {
         <section
           v-for="report in detail?.reports"
           :key="report.id"
+          v-show="reportView === 'independent'"
           class="ai-settings-card ai-model-report"
         >
-          <details>
+          <details :open="reportView === 'independent'">
             <summary>
               <strong>{{ report.modelSnapshot.displayName }} · 独立报告</strong
               ><small
                 >{{ report.modelSnapshot.model }} ·
                 {{
                   (report.validation as any).valid
-                    ? "引用校验通过"
+                    ? (report.executionPlan as any)?.warnings?.length
+                      ? "有效结论已保留，部分方案不可用"
+                      : "引用校验通过"
                     : "校验失败，未进入汇总"
                 }}</small
               ><ReportTooltip
@@ -967,10 +1047,28 @@ onBeforeUnmount(() => {
                 text="校验检查输出结构、引用标识、时间窗口和持仓建议必填条件；不表示观点正确、预测会兑现或交易能够获利。"
               />
             </summary>
+            <aside
+              v-if="(report.executionPlan as any)?.warnings?.length"
+              class="ai-branch-warnings"
+            >
+              <strong>以下方案不可用；模型原文仅供核对，不能据此执行</strong>
+              <p
+                v-for="(w, i) in (report.executionPlan as any).warnings"
+                :key="i"
+              >
+                {{ w.message }}
+              </p>
+            </aside>
             <p class="ai-prose">{{ overview(report) }}</p>
             <ReportOperations
               v-if="(report.validation as any).reportVersion === 2"
               :claims="report.claims"
+              :price-levels="
+                (report.executionPlan as any)?.context?.priceLevels
+              "
+              :signal-conditions="
+                (report.executionPlan as any)?.signalConditions
+              "
             />
             <article
               v-for="w in arr(report.windows)"
@@ -1014,7 +1112,14 @@ onBeforeUnmount(() => {
                   {{
                     output.role === "independent" ? "首次输出" : "格式修复输出"
                   }}
-                  · {{ output.validation.valid ? "校验通过" : "未通过校验" }}
+                  ·
+                  {{
+                    output.validation.valid
+                      ? output.validation.warnings?.length
+                        ? "有效结论保留，部分方案不可用"
+                        : "校验通过"
+                      : "未通过校验"
+                  }}
                 </summary>
                 <p v-if="output.validation.error">
                   {{ output.validation.error }}
@@ -1028,7 +1133,11 @@ onBeforeUnmount(() => {
             </details>
           </details>
         </section>
-        <section v-if="snapshot" class="ai-settings-card ai-source-details">
+        <section
+          v-if="snapshot"
+          v-show="reportView === 'operations'"
+          class="ai-settings-card ai-source-details"
+        >
           <details>
             <summary>
               资料与时间窗口
@@ -1135,7 +1244,7 @@ onBeforeUnmount(() => {
                       ? "已发送，等待响应"
                       : "未记录响应"
                     : call.phase === "responseHeaders"
-                      ? "接口已响应，等待生成/接收完整报告"
+                      ? "服务端已开始回应，还在等待完整报告"
                       : call.phase === "responseComplete"
                         ? "完整响应已接收"
                         : "阶段：" + call.phase

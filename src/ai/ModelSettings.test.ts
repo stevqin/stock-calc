@@ -205,3 +205,18 @@ describe("AI model settings", () => {
     w.unmount();
   });
 });
+it("DeepSeek预设提供官方地址和关闭思考说明", async () => {
+  const f = fixture();
+  const w = mount(ModelSettings, { props: { client: f.client } });
+  await flushPromises();
+  await w.get('button[aria-label="编辑模型一"]').trigger("click");
+  await w.get('select[aria-label="服务商"]').setValue("deepseek");
+  expect(
+    (w.get('input[aria-label="API 基础地址"]').element as HTMLInputElement)
+      .value,
+  ).toBe("https://api.deepseek.com");
+  expect(w.text()).toContain("关闭思考");
+  expect(
+    w.findAll("option").some((o) => o.attributes("value") === "deepseek-flash"),
+  ).toBe(true);
+});

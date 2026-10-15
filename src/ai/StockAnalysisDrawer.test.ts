@@ -152,7 +152,7 @@ describe("single stock AI drawer", () => {
     vi.mocked(loadTask).mockResolvedValue(pending);
     const w = mount(StockAnalysisDrawer, { props: { security } });
     await flushPromises();
-    expect(w.text()).toContain("接口已响应，等待生成/接收完整报告");
+    expect(w.text()).toContain("服务端已开始回应，还在等待完整报告");
     expect(w.text()).not.toContain("完整响应已接收");
     w.unmount();
   });
@@ -598,4 +598,24 @@ describe("single stock AI drawer", () => {
     expect(invoke).not.toHaveBeenCalled();
     w.unmount();
   });
+});
+
+it("三个报告入口切换可见内容并直接展开综合与独立报告", async () => {
+  vi.mocked(listHistory).mockResolvedValue({ items: [task], nextCursor: null });
+  const w = mount(StockAnalysisDrawer, {
+    attachTo: document.body,
+    props: { security },
+  });
+  await flushPromises();
+  const nav = w.get('[aria-label="报告视图"]');
+  expect(nav.text()).toContain("操作清单");
+  await nav.findAll("button")[1].trigger("click");
+  expect(w.get("[data-summary-details]").attributes("open")).toBeDefined();
+  expect(w.get(".ai-summary-card").isVisible()).toBe(true);
+  expect(w.get(".ai-model-report").isVisible()).toBe(false);
+  await nav.findAll("button")[2].trigger("click");
+  expect(w.get(".ai-model-report").isVisible()).toBe(true);
+  expect(w.get(".ai-model-report > details").attributes("open")).toBeDefined();
+  expect(w.get(".ai-summary-card").isVisible()).toBe(false);
+  w.unmount();
 });

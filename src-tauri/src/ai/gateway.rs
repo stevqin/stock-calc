@@ -51,6 +51,7 @@ pub struct Gateway {
     scheduler: Scheduler,
     header_timeout: Duration,
     generation_timeout: Duration,
+    deepseek_wait_timeout: Duration,
 }
 fn retry_delay(value: Option<&str>, now: i64) -> Duration {
     let Some(value) = value else {
@@ -75,6 +76,51 @@ fn is_mimo(config: &ModelConfig) -> bool {
                     "api.xiaomimimo.com" | "token-plan-cn.xiaomimimo.com"
                 )
             })
+}
+fn is_deepseek(config: &ModelConfig) -> bool {
+    config.provider == "deepseek"
+        || reqwest::Url::parse(&config.base_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+            .is_some_and(|host| host == "api.deepseek.com")
+}
+fn elapsed_words(duration: Duration) -> String {
+    let sec = duration.as_secs();
+    if sec == 0 {
+        "不到1秒".into()
+    } else if sec < 60 {
+        format!("{sec}秒")
+    } else if sec % 60 == 0 {
+        format!("{}分钟", sec / 60)
+    } else {
+        format!("{}分{}秒", sec / 60, sec % 60)
+    }
+}
+fn report_receive_error(
+    code: &str,
+    elapsed: Duration,
+    limit: Duration,
+    has_content: bool,
+    keepalive: bool,
+) -> AiError {
+    let progress = if has_content {
+        "已经收到部分报告，但尚未接收完整，不能用于汇总"
+    } else if keepalive {
+        "只收到服务器保持连接的等待信号，还没收到报告内容"
+    } else {
+        "还没收到报告内容"
+    };
+    let reason = if code == "generationTimeout" {
+        format!(
+            "已连接到模型服务，但本阶段等待达到{}，仍未得到完整报告。",
+            elapsed_words(limit)
+        )
+    } else {
+        "已连接到模型服务，但接收报告时连接中断。".into()
+    };
+    let mut e=error(code,&format!("{reason}{progress}。从接口开始回应起已等待{}。可能服务繁忙、生成较慢或连接不稳定；目前无法确认具体原因。请稍后手动重新分析；本次没有再次发送请求，避免重复调用。",elapsed_words(elapsed)));
+    e.retryable = code == "generationTimeout";
+    e
 }
 fn error(code: &str, message: &str) -> AiError {
     AiError::new(code, message)
@@ -126,6 +172,7 @@ impl Gateway {
             scheduler: Scheduler::new(),
             header_timeout: Duration::from_secs(60),
             generation_timeout: Duration::from_secs(300),
+            deepseek_wait_timeout: Duration::from_secs(660),
         })
     }
     pub async fn list_model_versions(
@@ -228,16 +275,17 @@ impl Gateway {
             None
         };
         if tool.is_none()
-            && is_mimo(config)
+            && (is_deepseek(config)
+                || (is_mimo(config)
+                    && [
+                        "mimo-v2.6-flash",
+                        "mimo-v2.6-pro",
+                        "mimo-v2.6-pro-ultraspeed",
+                        "mimo-v2.5-pro",
+                        "mimo-v2.5",
+                    ]
+                    .contains(&config.model.as_str())))
             && request.json_mode
-            && [
-                "mimo-v2.6-flash",
-                "mimo-v2.6-pro",
-                "mimo-v2.6-pro-ultraspeed",
-                "mimo-v2.5-pro",
-                "mimo-v2.5",
-            ]
-            .contains(&config.model.as_str())
         {
             payload["response_format"] = serde_json::json!({"type":"json_object"});
         }
@@ -245,7 +293,7 @@ impl Gateway {
             payload["tools"] = serde_json::json!([{"type":"function","function":tool}]);
             payload["tool_choice"] = serde_json::json!("auto");
         }
-        if is_mimo(config) && (request.disable_thinking || tool.is_some()) {
+        if is_mimo(config) || is_deepseek(config) {
             payload["thinking"] = serde_json::json!({"type":"disabled"});
         }
         if serde_json::to_vec(&payload)
@@ -266,7 +314,7 @@ impl Gateway {
             };
             let mut response = match sent {
                 Err(_) => {
-                    let mut e=error("responseStartTimeout",&format!("请求已发出，{}秒内未收到接口响应头；无法确认服务端处理情况，未自动重试",self.header_timeout.as_secs()));
+                    let mut e=error("responseStartTimeout",&format!("已发出请求，但等待{}秒后，模型服务仍未开始回应。无法确认对方是否已接收并处理；请检查网络与API地址，或稍后手动重试。本次没有再次发送请求，避免重复调用",self.header_timeout.as_secs()));
                     e.retryable = true;
                     return Err(e);
                 }
@@ -280,12 +328,12 @@ impl Gateway {
                     let mut err = if e.is_connect() && e.is_timeout() {
                         error(
                             "connectionTimeout",
-                            "建立模型连接超时（15秒，含TLS握手），请检查网络或接口地址",
+                            "15秒内未能建立到模型服务的安全连接，尚未开始接收报告。请检查联网、代理设置和API基础地址",
                         )
                     } else if e.is_timeout() {
                         error(
                             "responseStartTimeout",
-                            "请求已发出，但等待接口响应头超时；未自动重试",
+                            "请求已发出，但模型服务未及时开始回应。无法确认对方是否已处理；本次没有再次发送请求，请稍后手动重试",
                         )
                     } else {
                         error("connection", "模型连接失败，请检查地址或网络")
@@ -343,12 +391,19 @@ impl Gateway {
                 ));
             }
             let mut bytes = Vec::new();
-            let budget = if request.json_mode {
+            let started = tokio::time::Instant::now();
+            let deepseek = is_deepseek(config) && request.json_mode;
+            let mut budget = if deepseek {
+                self.deepseek_wait_timeout
+            } else if request.json_mode {
                 self.generation_timeout
             } else {
                 self.header_timeout
             };
-            let deadline = tokio::time::Instant::now() + budget;
+            let mut deadline = started + budget;
+            let mut has_content = false;
+            let mut keepalive = false;
+            let mut total_received = 0usize;
             loop {
                 let received = tokio::select! {biased;
                     _=context.cancel.cancelled()=>return Err(error("cancelled","分析已取消")),
@@ -356,31 +411,61 @@ impl Gateway {
                 };
                 let chunk = match received {
                     Err(_) => {
-                        let mut e=error("generationTimeout",&format!("接口已返回响应头，等待生成/接收完整报告超时（{}秒）；未自动重试，避免重复调用",budget.as_secs()));
-                        e.retryable = true;
-                        return Err(e);
+                        return Err(report_receive_error(
+                            "generationTimeout",
+                            started.elapsed(),
+                            budget,
+                            has_content,
+                            keepalive,
+                        ))
                     }
                     Ok(Ok(c)) => c,
                     Ok(Err(e)) => {
-                        let mut err = if e.is_timeout() {
-                            error("generationTimeout","接口已返回响应头，但等待生成/接收完整报告超时；未自动重试，避免重复调用")
-                        } else {
-                            error("responseRead", "接口已响应，但完整报告读取失败；未自动重试")
-                        };
-                        err.retryable = e.is_timeout();
-                        return Err(err);
+                        return Err(report_receive_error(
+                            if e.is_timeout() {
+                                "generationTimeout"
+                            } else {
+                                "responseRead"
+                            },
+                            started.elapsed(),
+                            budget,
+                            has_content,
+                            keepalive,
+                        ))
                     }
                 };
                 let Some(chunk) = chunk else { break };
-                if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
-                    return Err(error("responseTooLarge", "模型响应超过2MB"));
+                total_received = total_received.saturating_add(chunk.len());
+                if total_received > 2 * 1024 * 1024 {
+                    return Err(error("responseTooLarge","模型返回的数据超过本次接收上限，已停止读取。请减少手工资料或让报告更精简；本次没有再次发送请求"));
+                }
+                if !has_content && chunk.iter().all(u8::is_ascii_whitespace) {
+                    keepalive = true;
+                    continue;
+                }
+                if !has_content {
+                    has_content = true;
+                    if deepseek {
+                        budget = self.generation_timeout;
+                        deadline = tokio::time::Instant::now() + budget;
+                    }
                 }
                 bytes.extend_from_slice(&chunk);
+            }
+            if !has_content {
+                return Err(error(
+                    "emptyResponse",
+                    if keepalive {
+                        "模型服务结束了连接，只收到保持连接的等待信号，没有报告内容。可能服务繁忙或等待被对方结束；请稍后手动重新分析。本次没有再次发送请求"
+                    } else {
+                        "模型服务结束了连接，但没有报告内容。请核对模型版本与接口兼容情况，或稍后手动重试。本次没有再次发送请求"
+                    },
+                ));
             }
             drop(permit);
             context.record(CallEvent::ResponseCompleted(attempts))?;
             let value: serde_json::Value = serde_json::from_slice(&bytes)
-                .map_err(|_| error("protocol", "模型响应不是兼容的 JSON 格式"))?;
+                .map_err(|_| error("protocol", "模型服务已经返回数据，但不是本程序能读取的完整报告格式。请核对API基础地址是否为兼容聊天接口；已停止本次读取，没有再次发送请求"))?;
             let tool_content = if let Some(calls) = value
                 .pointer("/choices/0/message/tool_calls")
                 .and_then(|v| v.as_array())
@@ -414,7 +499,7 @@ impl Gateway {
                     let finish=value.pointer("/choices/0/finish_reason").and_then(|v|v.as_str()).filter(|s|["length","stop","content_filter","tool_calls","function_call","repetition_truncation"].contains(s)).unwrap_or("unknown");
                     let completed=value.pointer("/usage/completion_tokens").and_then(|v|v.as_u64());
                     let reasoning=value.pointer("/usage/completion_tokens_details/reasoning_tokens").and_then(|v|v.as_u64());
-                    error("protocol",&format!("接口已完整响应但没有报告正文（finish_reason={finish}，completion_tokens={completed:?}，reasoning_tokens={reasoning:?}）；{}",if finish=="length"{"生成达到token上限，可能只完成思考；未自动重试"}else{"模型没有提供兼容的文本内容；未自动重试"}))
+                    error("protocol",&format!("模型服务已完成回应，但没有给出报告正文。{}（诊断信息：结束标记={finish}，输出用量={completed:?}，思考用量={reasoning:?}）",if finish=="length"{"本次输出额度已用完，报告可能被截断或只生成了思考内容；请减少手工资料或使用支持关闭思考的型号。本次没有再次发送请求"}else{"对方未提供可读取的报告文字；请核对模型版本及接口兼容情况。本次没有再次发送请求"}))
                 })?;
             return Ok(CompletionResponse {
                 content: content.into(),
@@ -546,7 +631,7 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn mimo_uses_completion_tokens_and_disables_thinking_only_for_test() {
+    async fn mimo_uses_completion_tokens_and_disables_thinking() {
         let (url, seen, server) = serve(vec![(
             200,
             r#"{"choices":[{"message":{"content":"OK"}}]}"#.into(),
@@ -568,6 +653,200 @@ mod tests {
         assert_eq!(body["max_completion_tokens"], 16);
         assert!(body.get("max_tokens").is_none());
         assert_eq!(body["thinking"]["type"], "disabled");
+    }
+    #[tokio::test]
+    async fn deepseek_offline_request_disables_thinking_and_uses_native_json() {
+        let (url, seen, server) = serve(vec![(
+            200,
+            r#"{"choices":[{"message":{"content":"{}"}}]}"#.into(),
+        )])
+        .await;
+        let mut c = config(url);
+        c.provider = "deepseek".into();
+        c.model = "deepseek-flash".into();
+        let mut r = request();
+        r.json_mode = true;
+        Gateway::new()
+            .unwrap()
+            .complete(&c, "fixture-key", &r, &context())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let raw = seen.lock().unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(raw[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert_eq!(body["response_format"]["type"], "json_object");
+        assert_eq!(body["max_tokens"], 16);
+        assert!(body.get("max_completion_tokens").is_none());
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("tools").is_none());
+        assert_eq!(raw.len(), 1);
+    }
+    #[tokio::test]
+    async fn deepseek_offline_empty_keepalive_is_not_a_json_format_error() {
+        let (url, _, server) = serve(vec![(200, "\n\n \r\n".into())]).await;
+        let mut c = config(url);
+        c.provider = "deepseek".into();
+        let mut r = request();
+        r.json_mode = true;
+        let err = Gateway::new()
+            .unwrap()
+            .complete(&c, "fixture-key", &r, &context())
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert_eq!(err.code, "emptyResponse");
+        assert!(err.message.contains("没有报告"));
+        assert!(err.message.contains("保持连接"));
+        assert!(!err.message.contains("JSON"));
+    }
+    #[tokio::test]
+    async fn deepseek_offline_delayed_keepalive_report_remains_one_request() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0; 8192];
+            socket.read(&mut buf).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n\n\n").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            socket
+                .write_all(br#"{"choices":[{"message":{"content":"report"}}]}"#)
+                .await
+                .unwrap();
+        });
+        let mut c = config(url);
+        c.provider = "deepseek".into();
+        let mut r = request();
+        r.json_mode = true;
+        let mut gateway = Gateway::new().unwrap();
+        gateway.generation_timeout = Duration::from_millis(25);
+        let result = gateway
+            .complete(&c, "fixture-key", &r, &context())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(result.content, "report");
+        assert_eq!(result.attempts, 1);
+    }
+    #[test]
+    fn deepseek_offline_detection_is_exact_and_does_not_guess_from_model_name() {
+        for address in ["https://api.deepseek.com", "https://api.deepseek.com/v1"] {
+            assert!(is_deepseek(&config(address.into())));
+        }
+        for address in [
+            "https://api.deepseek.com.evil.example/v1",
+            "https://other.example/deepseek",
+            "http://127.0.0.1:1234/v1",
+        ] {
+            let mut c = config(address.into());
+            c.model = "deepseek-flash".into();
+            assert!(!is_deepseek(&c));
+        }
+        let c = config("http://127.0.0.1:1234/v1".into());
+        assert!(!is_mimo(&c));
+    }
+    #[tokio::test]
+    async fn deepseek_offline_keepalive_timeout_does_not_extend_or_resend() {
+        use std::sync::{
+            atomic::{AtomicU32, Ordering},
+            Arc,
+        };
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut b = [0; 8192];
+            socket.read(&mut b).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            loop {
+                if socket.write_all(b"\n").await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+        let count = Arc::new(AtomicU32::new(0));
+        let c = count.clone();
+        let mut ctx = context();
+        ctx.on_event = Some(Arc::new(move |e| {
+            if matches!(e, CallEvent::AttemptStarting(_)) {
+                c.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
+        }));
+        let mut cfg = config(url);
+        cfg.provider = "deepseek".into();
+        let mut r = request();
+        r.json_mode = true;
+        let mut gw = Gateway::new().unwrap();
+        gw.deepseek_wait_timeout = Duration::from_millis(80);
+        let started = std::time::Instant::now();
+        let err = gw
+            .complete(&cfg, "fixture-key", &r, &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "generationTimeout");
+        assert!(err.message.contains("保持连接"));
+        assert!(err.message.contains("还没收到报告"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        server.abort();
+    }
+    #[tokio::test]
+    async fn deepseek_offline_partial_response_then_disconnect_has_clear_error_and_no_resend() {
+        let (url, seen, server) = serve(vec![(200, "{\"choices\":".into())]).await;
+        let mut cfg = config(url);
+        cfg.provider = "deepseek".into();
+        let mut r = request();
+        r.json_mode = true;
+        // A completed truncated JSON body is a protocol error; a mid-transfer cut is separately tested below.
+        let err = Gateway::new()
+            .unwrap()
+            .complete(&cfg, "fixture-key", &r, &context())
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert_eq!(err.code, "protocol");
+        assert!(err.message.contains("本次读取"));
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut b = [0; 8192];
+            socket.read(&mut b).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n{\"choices\":").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        });
+        let mut cfg = config(url);
+        cfg.provider = "deepseek".into();
+        let err = Gateway::new()
+            .unwrap()
+            .complete(&cfg, "fixture-key", &r, &context())
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert_eq!(err.code, "responseRead");
+        assert!(err.message.contains("连接中断"));
+        assert!(err.message.contains("部分报告"));
+        assert!(err.message.contains("没有再次发送"));
     }
     #[tokio::test]
     async fn model_versions_use_saved_endpoint_and_bounded_parsing() {
@@ -610,7 +889,7 @@ mod tests {
         )));
     }
     #[tokio::test]
-    async fn analysis_keeps_thinking_default_and_generic_token_parameter() {
+    async fn analysis_disables_mimo_thinking_without_sending_vendor_fields_to_custom() {
         for provider in ["xiaomi-mimo", "custom"] {
             let (url, seen, server) = serve(vec![(
                 200,
@@ -628,7 +907,11 @@ mod tests {
             let seen = seen.lock().unwrap();
             let body: serde_json::Value =
                 serde_json::from_str(seen[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
-            assert!(body.get("thinking").is_none());
+            if provider == "xiaomi-mimo" {
+                assert_eq!(body["thinking"]["type"], "disabled");
+            } else {
+                assert!(body.get("thinking").is_none());
+            }
             assert_eq!(
                 body[if provider == "custom" {
                     "max_tokens"
@@ -717,7 +1000,7 @@ mod tests {
         server.await.unwrap();
         assert_eq!(seen.lock().unwrap().len(), 2);
     }
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn headers_timeout_60s_does_not_resend() {
         use std::sync::{
             atomic::{AtomicU32, Ordering},
@@ -756,6 +1039,9 @@ mod tests {
                 .await
         });
         notify.notified().await;
+        // Keep real time during the socket handshake: paused Tokio time may
+        // auto-advance while waiting for I/O and expire the header deadline early.
+        tokio::time::pause();
         tokio::time::advance(Duration::from_secs(59)).await;
         assert!(!run.is_finished());
         tokio::time::advance(Duration::from_secs(2)).await;
@@ -946,7 +1232,7 @@ mod tests {
         .unwrap_err();
         server.abort();
         assert_eq!(err.code, "connectionTimeout");
-        assert!(err.message.contains("TLS"));
+        assert!(err.message.contains("安全连接"));
     }
     #[test]
     fn retry_after_http_date_is_respected() {
@@ -1021,6 +1307,7 @@ mod tests {
             scheduler: Scheduler::new(),
             header_timeout: Duration::from_secs(60),
             generation_timeout: Duration::from_secs(300),
+            deepseek_wait_timeout: Duration::from_secs(660),
         };
         let run = tokio::spawn(async move {
             gateway

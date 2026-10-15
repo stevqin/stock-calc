@@ -91,11 +91,19 @@ const claims = [
   evidenceIds: ["q", "p", "cash"],
 }));
 const executionPlan = {
+  signalConditions: {
+    stabilization:
+      "L2上方连续两根5分钟K线不再创新低，后根收盘高于前根，卖出回款确认后再评估买回。",
+    weakening:
+      "反弹触及L1后连续两根5分钟K线未创新高，后根收盘回落；条件未出现则先持有。",
+  },
   decision:
     "保留400股底仓：反弹至32.80元转弱时先卖200股，回落至31.51元企稳后买回200股；未触发则等待。",
   preferredScenario: "tRoundTrip",
   context: {
     targetSession: "今日剩余时段",
+    position: { quantity: "800" },
+    signalConditionsRequired: true,
     reserveQuantity: "400",
     maxTQuantity: "200",
     cash: { balance: "433.15" },
@@ -136,6 +144,8 @@ const executionPlan = {
       steps: [
         {
           side: "sell",
+          lowId: "L1",
+          highId: "L1",
           priceLow: "32.80",
           priceHigh: "32.80",
           quantity: "200",
@@ -149,6 +159,8 @@ const executionPlan = {
         },
         {
           side: "buy",
+          lowId: "L2",
+          highId: "L2",
           priceLow: "31.51",
           priceHigh: "31.51",
           quantity: "200",

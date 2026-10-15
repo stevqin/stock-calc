@@ -130,6 +130,34 @@ fn required(c: &Value) -> AiResult<()> {
     }
     Ok(())
 }
+pub fn validate_operation_shapes(body: &Value, field: &str) -> AiResult<()> {
+    if body["reportVersion"] != 2 {
+        return Err(invalid("报告缺少V2版本标识"));
+    }
+    let cs = body[field]
+        .as_array()
+        .ok_or_else(|| invalid("缺少五类操作建议"))?;
+    if cs.iter().any(|c| {
+        c.get("operationType").is_some()
+            && !OPERATIONS.contains(&c["operationType"].as_str().unwrap_or(""))
+    }) {
+        return Err(invalid("未知操作类别"));
+    }
+    for op in OPERATIONS {
+        let entries = cs
+            .iter()
+            .filter(|c| c["operationType"] == op)
+            .collect::<Vec<_>>();
+        if entries.len() != 1 {
+            return Err(invalid(&format!(
+                "五类操作建议中 {op} 模块应有1项，实际{}项",
+                entries.len()
+            )));
+        }
+        required(entries[0])?;
+    }
+    Ok(())
+}
 pub fn validate_references(body: &Value, s: &Snapshot) -> AiResult<()> {
     let Some(cs) = body["claims"].as_array() else {
         return Ok(());
@@ -278,6 +306,41 @@ pub fn summary_shape(reports: &[IndependentReport]) -> Value {
         }
     }
     json!({"reportVersion":2,"overview":"填写综合首选动作与限制，只有一个有效模型明确单模型依据","keyClaims":claims,"disagreements":[]})
+}
+pub fn guard_unavailable_summary_claims(body: &mut Value, reports: &[IndependentReport]) {
+    let Some(claims) = body["keyClaims"].as_array_mut() else {
+        return;
+    };
+    for claim in claims {
+        let reasons: Vec<String> = claim["supports"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|support| {
+                reports
+                    .iter()
+                    .find(|r| r.id == support["reportId"])
+                    .and_then(|r| r.claims.as_array())
+                    .and_then(|cs| {
+                        cs.iter().find(|c| {
+                            c["id"] == support["claimId"]
+                                && c["operationType"] == claim["operationType"]
+                        })
+                    })
+                    .and_then(|c| c["unavailableReason"].as_str())
+                    .map(str::to_owned)
+            })
+            .collect();
+        if !reasons.is_empty() {
+            super::execution::mark_unavailable_claim(
+                claim,
+                &format!(
+                    "这条汇总结论引用了不可用的操作方案，不用于操作；其他有效结论保留。{}",
+                    reasons.join("；")
+                ),
+            );
+        }
+    }
 }
 pub fn validate_summary(body: &Value, reports: &[IndependentReport]) -> AiResult<()> {
     if !reports.iter().any(|r| {

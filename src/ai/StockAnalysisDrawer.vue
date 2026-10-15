@@ -1059,6 +1059,15 @@ onBeforeUnmount(() => {
                 {{ w.message }}
               </p>
             </aside>
+            <p
+              v-for="(note, i) in arr(
+                (report.validation as any)?.formatWarnings,
+              )"
+              :key="'format-' + i"
+              class="ai-muted"
+            >
+              {{ note }}
+            </p>
             <p class="ai-prose">{{ overview(report) }}</p>
             <ReportOperations
               v-if="(report.validation as any).reportVersion === 2"
@@ -1123,6 +1132,13 @@ onBeforeUnmount(() => {
                 </summary>
                 <p v-if="output.validation.error">
                   {{ output.validation.error }}
+                </p>
+                <p
+                  v-for="(note, i) in output.validation.formatWarnings ?? []"
+                  :key="i"
+                  class="ai-muted"
+                >
+                  {{ note }}
                 </p>
                 <pre>{{ output.rawOutput }}</pre>
               </details>

@@ -95,6 +95,7 @@ export interface IndependentReport {
       valid: boolean;
       error?: string | null;
       finishReason?: string | null;
+      formatWarnings?: string[] | null;
       warnings?: Array<{
         scenario: string;
         message: string;

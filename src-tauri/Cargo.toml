@@ -1,6 +1,6 @@
 [package]
 name = "t-calculator"
-version = "0.9.8"
+version = "0.9.9"
 description = "A-share and ETF round-trip cost calculator"
 authors = ["Stev"]
 edition = "2021"

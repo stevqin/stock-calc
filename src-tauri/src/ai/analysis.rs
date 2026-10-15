@@ -355,6 +355,39 @@ fn model_snapshot(s: &Snapshot) -> Snapshot {
     }
     wire
 }
+fn parse_report_json(raw: &str, title: &str) -> AiResult<(Value, Vec<String>)> {
+    let raw = raw
+        .trim()
+        .strip_prefix("```json")
+        .unwrap_or(raw.trim())
+        .trim()
+        .trim_end_matches("```")
+        .trim();
+    match serde_json::from_str::<Value>(raw) {
+        Ok(value) if value.is_object() => Ok((value, vec![])),
+        Ok(_) => Err(invalid(&format!(
+            "{title}格式错误：最外层必须是一份JSON对象，不能是数组或普通文字。原始输出已保留。"
+        ))),
+        Err(e) => {
+            // Only ignore ONE redundant closing brace after an otherwise complete
+            // object. Never invent missing syntax, merge objects, or discard prose.
+            let mut stream = serde_json::Deserializer::from_str(raw).into_iter::<Value>();
+            if let Some(Ok(value)) = stream.next() {
+                if value.is_object() && raw[stream.byte_offset()..].trim() == "}" {
+                    return Ok((value, vec!["检测到完整JSON对象后多余的一个结束括号 }，已在本机忽略该括号后重新校验；没有改动价格、股数或正文，原始输出仍保留。".into()]));
+                }
+            }
+            let detail = if e.is_eof() {
+                "内容在结束前中断，JSON没有写完整"
+            } else if e.to_string().contains("trailing characters") {
+                "完整对象后还有多余内容，不能当作单份报告读取"
+            } else {
+                "JSON符号、引号或分隔格式不正确"
+            };
+            Err(invalid(&format!("{title}格式错误：第{}行、第{}列，{detail}。原始输出已保留；不能补造缺失内容或改动价格和股数。",e.line(),e.column())))
+        }
+    }
+}
 #[cfg(test)]
 fn validate_snapshot_report_strict(raw: &str, s: &Snapshot) -> AiResult<Value> {
     validate_snapshot_report_mode(raw, s, false)
@@ -363,16 +396,8 @@ fn validate_snapshot_report(raw: &str, s: &Snapshot) -> AiResult<Value> {
     validate_snapshot_report_mode(raw, s, true)
 }
 fn validate_snapshot_report_mode(raw: &str, s: &Snapshot, partial: bool) -> AiResult<Value> {
-    let raw = raw
-        .trim()
-        .strip_prefix("```json")
-        .unwrap_or(raw.trim())
-        .trim()
-        .trim_end_matches("```")
-        .trim();
-    let mut body = report_v2::normalize_wire(
-        serde_json::from_str(raw).map_err(|_| invalid("模型未返回有效JSON报告"))?,
-    )?;
+    let (parsed, format_warnings) = parse_report_json(raw, "模型报告")?;
+    let mut body = report_v2::normalize_wire(parsed)?;
     if let Some(claims) = body["claims"].as_array_mut() {
         for c in claims {
             if let Some(refs) = c["evidenceIds"].as_array_mut() {
@@ -409,18 +434,11 @@ fn validate_snapshot_report_mode(raw: &str, s: &Snapshot, partial: bool) -> AiRe
         super::execution::validate_and_enrich(&mut body, s)?;
     }
     validate_strategies(&body, s)?;
+    body["formatWarnings"] = json!(format_warnings);
     Ok(body)
 }
 fn validate_summary(raw: &str, reports: &[IndependentReport]) -> AiResult<Value> {
-    let mut body: Value = serde_json::from_str(
-        raw.trim()
-            .strip_prefix("```json")
-            .unwrap_or(raw.trim())
-            .trim()
-            .trim_end_matches("```")
-            .trim(),
-    )
-    .map_err(|_| invalid("汇总未返回有效 JSON"))?;
+    let (mut body, format_warnings) = parse_report_json(raw, "汇总报告")?;
     if let Some(claims) = body["keyClaims"].as_array_mut() {
         for c in claims {
             if let Some(supports) = c["supports"].as_array_mut() {
@@ -520,6 +538,7 @@ fn validate_summary(raw: &str, reports: &[IndependentReport]) -> AiResult<Value>
     report_v2::guard_unavailable_summary_claims(&mut body, reports);
     report_v2::validate_summary(&body, reports)?;
     super::execution::select_summary(&mut body, reports)?;
+    body["formatWarnings"] = json!(format_warnings);
     Ok(body)
 }
 async fn bytes(mut r: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
@@ -1200,7 +1219,7 @@ fn output_record(
     response: &super::gateway::CompletionResponse,
     result: &AiResult<Value>,
 ) -> Value {
-    json!({"role":role,"rawOutput":response.content,"validation":{"valid":result.is_ok(),"warnings":result.as_ref().ok().map(|b|b["executionPlan"]["warnings"].clone()),"error":result.as_ref().err().map(|e|e.message.clone()),"finishReason":response.finish_reason},"usage":response.usage,"attempts":response.attempts})
+    json!({"role":role,"rawOutput":response.content,"validation":{"valid":result.is_ok(),"warnings":result.as_ref().ok().map(|b|b["executionPlan"]["warnings"].clone()),"formatWarnings":result.as_ref().ok().map(|b|b["formatWarnings"].clone()),"error":result.as_ref().err().map(|e|e.message.clone()),"finishReason":response.finish_reason},"usage":response.usage,"attempts":response.attempts})
 }
 async fn independent(
     app: &tauri::AppHandle,
@@ -1326,7 +1345,7 @@ async fn independent(
         execution_plan: b.get("executionPlan").cloned(),
         raw_output: response.content,
         outputs,
-        validation: json!({"finishReason":response.finish_reason,"reportVersion":if report_v2::is_v2(s){2}else{1},"valid":valid,"warnings":b["executionPlan"]["warnings"],"brief":b["overview"],"error":body.as_ref().err().map(|e|e.message.clone()),"scope":if valid {"结构与证据引用已校验；推理质量为模型判断"} else {"输出未通过校验，不作为有效独立报告"}}),
+        validation: json!({"finishReason":response.finish_reason,"reportVersion":if report_v2::is_v2(s){2}else{1},"valid":valid,"warnings":b["executionPlan"]["warnings"],"formatWarnings":b["formatWarnings"],"brief":b["overview"],"error":body.as_ref().err().map(|e|e.message.clone()),"scope":if valid {"结构与证据引用已校验；推理质量为模型判断"} else {"输出未通过校验，不作为有效独立报告"}}),
         usage: response.usage,
     };
     let state = app.state::<Store>();
@@ -1399,7 +1418,7 @@ async fn summarize(
         windows: json!({"overview":body["overview"],"rawOutput":response.content,"executionPlan":body.get("executionPlan")}),
         key_claims: body["keyClaims"].clone(),
         disagreements: body["disagreements"].clone(),
-        validation: json!({"reportVersion":if report_v2::is_v2(s){2}else{1},"valid":true,"validModelCount":reports.len(),"consensusVerified":false,"usage":response.usage}),
+        validation: json!({"reportVersion":if report_v2::is_v2(s){2}else{1},"valid":true,"validModelCount":reports.len(),"consensusVerified":false,"formatWarnings":body["formatWarnings"],"usage":response.usage}),
     };
     let state = app.state::<Store>();
     let mut db = state.0.lock().map_err(|_| AiError::storage())?;
@@ -2149,7 +2168,7 @@ mod tests {
         let db =
             rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .unwrap();
-        let (snapshot, report): (String, String) = db.query_row("SELECT s.payload,r.payload FROM ai_reports r JOIN ai_tasks t ON t.id=r.task_id JOIN ai_snapshots s ON s.id=r.snapshot_id WHERE t.status='\"failed\"' ORDER BY t.seq DESC LIMIT 1", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        let (snapshot, report): (String, String) = db.query_row("SELECT s.payload,r.payload FROM ai_reports r JOIN ai_tasks t ON t.id=r.task_id JOIN ai_snapshots s ON s.id=r.snapshot_id WHERE t.status='\"failed\"' AND instr(r.payload,'executionPlan.scenarios.entry.steps')>0 ORDER BY t.seq DESC LIMIT 1", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         let s: Snapshot = serde_json::from_str(&snapshot).unwrap();
         let report: Value = serde_json::from_str(&report).unwrap();
         for output in report["outputs"].as_array().unwrap() {
@@ -2257,6 +2276,73 @@ mod tests {
             }
             assert!(validate_summary(&summary.to_string(), &[r.clone()]).is_err());
         }
+    }
+    #[test]
+    #[ignore = "explicit read-only JSON failure replay; no model calls or credential access"]
+    fn saved_json_failure_replay_identifies_status_and_recovers_repair() {
+        let path = std::env::var("TKE_QA_DATABASE_PATH").expect("read-only database path required");
+        let db =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let (snapshot, report): (String,String) = db.query_row("SELECT s.payload,r.payload FROM ai_reports r JOIN ai_tasks t ON t.id=r.task_id JOIN ai_snapshots s ON s.id=r.snapshot_id WHERE instr(r.payload,'模型未返回有效JSON报告')>0 ORDER BY t.seq DESC LIMIT 1",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+        let s: Snapshot = serde_json::from_str(&snapshot).unwrap();
+        let report: Value = serde_json::from_str(&report).unwrap();
+        let outputs = report["outputs"].as_array().unwrap();
+        let first = outputs.iter().find(|o| o["role"] == "independent").unwrap()["rawOutput"]
+            .as_str()
+            .unwrap();
+        let err = validate_snapshot_report(first, &s).unwrap_err();
+        assert!(err.message.contains("operations.today.status"));
+        assert!(err.message.contains("review"));
+        let repair = outputs.iter().find(|o| o["role"] == "repair").unwrap()["rawOutput"]
+            .as_str()
+            .unwrap();
+        let checked = validate_snapshot_report(repair, &s).unwrap();
+        assert_eq!(checked["formatWarnings"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            checked["windows"],
+            parse_report_json(repair, "离线报告").unwrap().0["windows"]
+        );
+        if let Ok(dir) = std::env::var("TKE_QA_OUTPUT_DIR") {
+            let dir = std::path::Path::new(&dir);
+            assert!(dir.starts_with("/private/tmp/"));
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(
+                dir.join("recovered-report.json"),
+                serde_json::to_vec_pretty(&checked).unwrap(),
+            )
+            .unwrap();
+        }
+        println!("Saved JSON failure replay passed: original status error identified; repaired output recovered locally; no model calls or database writes");
+    }
+    #[test]
+    fn json_extra_closing_brace_is_locally_normalized_without_changing_report_values() {
+        let (s, b) = execution_fixture();
+        let raw = format!("{}}}", b);
+        let out = validate_snapshot_report(&raw, &s).unwrap();
+        assert_eq!(
+            out["executionPlan"]["scenarios"]["tRoundTrip"]["steps"][0]["quantity"],
+            "200"
+        );
+        assert_eq!(out["claims"][0]["text"], b["claims"][0]["text"]);
+        assert!(out["formatWarnings"][0].as_str().unwrap().contains("多余"));
+        assert_eq!(raw, format!("{}}}", b));
+        for bad in [
+            format!("{}{{}}", b),
+            format!("{}解释", b),
+            b.to_string().trim_end_matches('}').to_string(),
+        ] {
+            assert!(validate_snapshot_report(&bad, &s).is_err());
+        }
+    }
+    #[test]
+    fn operation_enum_error_names_the_exact_field_value_and_allowed_values() {
+        let (s, mut b) = execution_fixture();
+        b["operations"]["today"]["status"] = json!("review");
+        let err = validate_snapshot_report(&b.to_string(), &s).unwrap_err();
+        assert!(err.message.contains("operations.today.status"));
+        assert!(err.message.contains("review"));
+        assert!(err.message.contains("wait"));
     }
     #[test]
     fn partial_report_keeps_valid_t_and_rejects_two_entry_steps_without_editing_orders() {

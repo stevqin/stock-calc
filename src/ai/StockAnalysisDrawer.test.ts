@@ -580,7 +580,10 @@ describe("single stock AI drawer", () => {
       {
         role: "repair",
         rawOutput: "REPAIR_OUTPUT",
-        validation: { valid: true },
+        validation: {
+          valid: true,
+          formatWarnings: ["本机忽略多余结束括号，原始输出保留"],
+        },
       },
     ];
     vi.mocked(listHistory).mockResolvedValue({
@@ -594,6 +597,7 @@ describe("single stock AI drawer", () => {
     expect(w.text()).toContain("格式修复输出");
     expect(w.text()).toContain("FIRST_OUTPUT");
     expect(w.text()).toContain("REPAIR_OUTPUT");
+    expect(w.text()).toContain("本机忽略多余结束括号，原始输出保留");
     expect(w.text()).toContain("claims[0].id");
     expect(invoke).not.toHaveBeenCalled();
     w.unmount();

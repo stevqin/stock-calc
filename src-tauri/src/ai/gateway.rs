@@ -274,17 +274,16 @@ impl Gateway {
         } else {
             None
         };
-        if tool.is_none()
-            && (is_deepseek(config)
-                || (is_mimo(config)
-                    && [
-                        "mimo-v2.6-flash",
-                        "mimo-v2.6-pro",
-                        "mimo-v2.6-pro-ultraspeed",
-                        "mimo-v2.5-pro",
-                        "mimo-v2.5",
-                    ]
-                    .contains(&config.model.as_str())))
+        if (is_deepseek(config)
+            || (is_mimo(config)
+                && [
+                    "mimo-v2.6-flash",
+                    "mimo-v2.6-pro",
+                    "mimo-v2.6-pro-ultraspeed",
+                    "mimo-v2.5-pro",
+                    "mimo-v2.5",
+                ]
+                .contains(&config.model.as_str())))
             && request.json_mode
         {
             payload["response_format"] = serde_json::json!({"type":"json_object"});
@@ -574,7 +573,7 @@ mod tests {
         );
         assert_eq!(payload["thinking"]["type"], "disabled");
         assert_eq!(payload["tool_choice"], "auto");
-        assert!(payload.get("response_format").is_none());
+        assert_eq!(payload["response_format"]["type"], "json_object");
         let (url, _, server) = serve(vec![(
             200,
             body.replace("return_stock_report", "unexpected_tool"),

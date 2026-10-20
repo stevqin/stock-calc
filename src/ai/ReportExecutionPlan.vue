@@ -195,7 +195,7 @@ function band(lo: unknown, hi: unknown) {
         ><span
           >单轮做 T ≤ <b>{{ context.maxTQuantity }} {{ unit }}</b></span
         ><span
-          >账本余额 <b>{{ context.cash?.balance ?? "未提供" }} 元</b></span
+          >现金余额（记录值） <b>{{ context.cash?.balance ?? "未提供" }} 元</b></span
         >
       </div>
       <p v-if="context.nextSession" class="ai-muted">
@@ -303,7 +303,7 @@ function band(lo: unknown, hi: unknown) {
             >
           </div>
           <div>
-            <small>完成后账本余额</small
+            <small>完成后现金余额（测算）</small
             ><b>{{ band(effects.cashAfterMin, effects.cashAfterMax) }} 元</b>
           </div>
         </div>

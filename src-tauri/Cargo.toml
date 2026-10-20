@@ -1,6 +1,6 @@
 [package]
 name = "t-calculator"
-version = "0.9.9"
+version = "0.9.20"
 description = "A-share and ETF round-trip cost calculator"
 authors = ["Stev"]
 edition = "2021"
@@ -21,6 +21,7 @@ encoding_rs = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
+scraper = "0.24"
 keyring = { version = "=3.6.3", features = ["apple-native", "windows-native"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net", "io-util", "test-util"] }
 tokio-util = "0.7"

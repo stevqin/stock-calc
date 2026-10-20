@@ -16,6 +16,8 @@ pub struct CompletionRequest {
     #[serde(default)]
     pub json_mode: bool,
     #[serde(default)]
+    pub report_mode: bool,
+    #[serde(default)]
     pub structured_tool: Option<serde_json::Value>,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -391,10 +393,10 @@ impl Gateway {
             }
             let mut bytes = Vec::new();
             let started = tokio::time::Instant::now();
-            let deepseek = is_deepseek(config) && request.json_mode;
+            let deepseek = is_deepseek(config) && (request.json_mode || request.report_mode);
             let mut budget = if deepseek {
                 self.deepseek_wait_timeout
-            } else if request.json_mode {
+            } else if request.json_mode || request.report_mode {
                 self.generation_timeout
             } else {
                 self.header_timeout
@@ -536,6 +538,7 @@ mod tests {
             max_tokens: 16,
             disable_thinking: false,
             json_mode: false,
+            report_mode: false,
             structured_tool: None,
         }
     }
@@ -683,6 +686,37 @@ mod tests {
         assert_eq!(raw.len(), 1);
     }
     #[tokio::test]
+    async fn markdown_report_wire_has_no_schema_and_keeps_partial_prose() {
+        for provider in ["deepseek", "xiaomi-mimo", "custom"] {
+            let (url, seen, server) = serve(vec![(200, r##"{"choices":[{"finish_reason":"length","message":{"content":"# 操作\n\n卖出200股，L1=12.34 **"}}]}"##.into())]).await;
+            let mut c = config(url);
+            c.provider = provider.into();
+            let mut r = request();
+            r.report_mode = true;
+            r.disable_thinking = true;
+            let mut ctx = context();
+            ctx.allow_transient_retry = false;
+            let result = Gateway::new()
+                .unwrap()
+                .complete(&c, "fixture-key", &r, &ctx)
+                .await
+                .unwrap();
+            server.await.unwrap();
+            assert_eq!(result.content, "# 操作\n\n卖出200股，L1=12.34 **");
+            assert_eq!(result.finish_reason.as_deref(), Some("length"));
+            let raw = seen.lock().unwrap();
+            assert_eq!(raw.len(), 1);
+            let body: serde_json::Value =
+                serde_json::from_str(raw[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            for field in ["tools", "tool_choice", "response_format"] {
+                assert!(body.get(field).is_none());
+            }
+            if provider != "custom" {
+                assert_eq!(body["thinking"]["type"], "disabled");
+            }
+        }
+    }
+    #[tokio::test]
     async fn deepseek_offline_empty_keepalive_is_not_a_json_format_error() {
         let (url, _, server) = serve(vec![(200, "\n\n \r\n".into())]).await;
         let mut c = config(url);
@@ -722,7 +756,7 @@ mod tests {
         let mut c = config(url);
         c.provider = "deepseek".into();
         let mut r = request();
-        r.json_mode = true;
+        r.report_mode = true;
         let mut gateway = Gateway::new().unwrap();
         gateway.generation_timeout = Duration::from_millis(25);
         let result = gateway
@@ -1094,7 +1128,7 @@ mod tests {
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
     #[tokio::test]
-    async fn structured_body_has_a_separate_longer_generation_budget() {
+    async fn markdown_body_has_a_separate_longer_generation_budget() {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
@@ -1125,7 +1159,7 @@ mod tests {
         gateway.header_timeout = Duration::from_millis(100);
         gateway.generation_timeout = Duration::from_secs(1);
         let mut req = request();
-        req.json_mode = true;
+        req.report_mode = true;
         let result = tokio::time::timeout(
             Duration::from_secs(2),
             gateway.complete(&config(url), "fixture-key", &req, &context()),

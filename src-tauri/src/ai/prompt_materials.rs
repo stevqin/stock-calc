@@ -28,13 +28,36 @@ fn market_table(v: &Value) -> Value {
     }
 }
 pub fn snapshot(s: &Snapshot) -> Value {
-    let evidence=s.evidence.iter().map(|e|{
+    let evidence=s.evidence.iter().filter(|e|e.kind!="accountSummary").map(|e|{
   let parsed=serde_json::from_str::<Value>(&e.content).unwrap_or_else(|_|Value::String(e.content.clone()));
   let mut content=if ["daily","intraday"].contains(&e.kind.as_str()){market_table(&parsed)}else{parsed};
   if e.kind=="execution" {if let Some(p)=content["position"].as_object_mut(){p.remove("trades");p.remove("feeProfile");}}
+  if e.kind=="news" {if let Some(news)=content.as_object_mut(){news.remove("summary");if e.availability!="fullText" {news.remove("fullText");news.insert("readingBoundary".into(),json!("未取得完整正文，仅作为来源线索，不用于事件影响判断。"));}}}
   json!({"id":e.id,"kind":e.kind,"source":e.source,"url":e.url,"publishedAt":e.published_at,"timePrecision":e.time_precision,"eventAt":e.event_at,"collectedAt":e.collected_at,"availability":e.availability,"referenceAllowed":e.availability!="titleOnly","content":content})
  }).collect::<Vec<_>>();
-    json!({"security":s.security,"cutoffAt":s.cutoff_at,"frozenAt":s.frozen_at,"referencePrice":s.reference_price,"windows":s.windows,"sourceStates":s.source_states,"allowedEvidenceIds":s.evidence.iter().filter(|e|e.availability!="titleOnly").map(|e|e.id.clone()).collect::<Vec<_>>(),"requiredOperationEvidenceIds":s.evidence.iter().filter(|e|["position","cash"].contains(&e.kind.as_str())).map(|e|e.id.clone()).collect::<Vec<_>>(),"evidence":evidence})
+    let account_summary = s
+        .evidence
+        .iter()
+        .find(|e| e.kind == "accountSummary")
+        .and_then(|e| serde_json::from_str::<Value>(&e.content).ok())
+        .unwrap_or_else(|| super::account_brief::build(s));
+    json!({"readingGuide":super::account_brief::READING_GUIDE,"accountSummary":account_summary,"security":s.security,"cutoffAt":s.cutoff_at,"frozenAt":s.frozen_at,"referencePrice":s.reference_price,"windows":s.windows,"sourceStates":s.source_states,"allowedEvidenceIds":s.evidence.iter().filter(|e|e.availability!="titleOnly" && e.kind!="accountSummary").map(|e|e.id.clone()).collect::<Vec<_>>(),"requiredOperationEvidenceIds":s.evidence.iter().filter(|e|["position","cash"].contains(&e.kind.as_str())).map(|e|e.id.clone()).collect::<Vec<_>>(),"evidence":evidence})
+}
+// The synthesis reads original model reports, not another full set of price bars.
+// Keep quotes, account/trades/cash, execution levels and evidence provenance intact.
+pub fn summary_snapshot(s: &Snapshot) -> Value {
+    let mut compact = snapshot(s);
+    if let Some(evidence) = compact["evidence"].as_array_mut() {
+        for item in evidence {
+            if matches!(item["kind"].as_str(), Some("daily" | "intraday")) {
+                item["content"] = json!({
+                    "notResent": true,
+                    "note": "完整行情序列已用于独立分析，本次汇总不重复发送；请依据独立报告综合判断，不声称已重新计算或核验行情指标。"
+                });
+            }
+        }
+    }
+    compact
 }
 #[cfg(test)]
 mod tests {
@@ -79,11 +102,15 @@ fn saved_snapshot_size_diagnostic() {
     assert!(new < old);
     assert_eq!(
         compact["evidence"].as_array().unwrap().len(),
-        s.evidence.len()
+        s.evidence
+            .iter()
+            .filter(|e| e.kind != "accountSummary")
+            .count()
     );
     for (e, item) in s
         .evidence
         .iter()
+        .filter(|e| e.kind != "accountSummary")
         .zip(compact["evidence"].as_array().unwrap())
     {
         if ["position", "cash"].contains(&e.kind.as_str()) {

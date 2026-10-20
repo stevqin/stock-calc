@@ -68,12 +68,14 @@ fn content(s: &Snapshot, kind: &str) -> Value {
         .and_then(|e| serde_json::from_str(&e.content).ok())
         .unwrap_or(Value::Null)
 }
+#[cfg(test)]
 pub fn context(s: &Snapshot) -> Option<Value> {
     s.evidence
         .iter()
         .find(|e| e.kind == "execution")
         .and_then(|e| serde_json::from_str(&e.content).ok())
 }
+#[cfg(test)]
 pub fn enabled(s: &Snapshot) -> bool {
     s.rule_versions["executionVersion"] == 1
 }
@@ -413,6 +415,7 @@ pub fn attach(s: &mut Snapshot, policy: Policy) -> AiResult<()> {
     s.rule_versions["executionVersion"] = json!(1);
     Ok(())
 }
+#[cfg(test)]
 pub fn shape(s: &Snapshot) -> Value {
     let ctx = context(s).unwrap_or(Value::Null);
     let watches = ctx["priceLevels"][0]["id"]
@@ -434,6 +437,7 @@ pub fn shape(s: &Snapshot) -> Value {
     }
     plan
 }
+#[cfg(test)]
 fn level(ctx: &Value, id: &Value, path: &str) -> AiResult<Decimal> {
     ctx["priceLevels"]
         .as_array()
@@ -453,6 +457,7 @@ fn level(ctx: &Value, id: &Value, path: &str) -> AiResult<Decimal> {
             )
         })
 }
+#[cfg(test)]
 fn validate_range(ctx: &Value, step: &Value, path: &str) -> AiResult<(Decimal, Decimal)> {
     let lo = level(ctx, &step["lowId"], &format!("{path}.lowId"))?;
     let hi = level(ctx, &step["highId"], &format!("{path}.highId"))?;
@@ -468,6 +473,7 @@ fn validate_range(ctx: &Value, step: &Value, path: &str) -> AiResult<(Decimal, D
     }
     Ok((lo, hi))
 }
+#[cfg(test)]
 fn enrich_case(ctx: &Value, name: &str, input: &Value) -> AiResult<Value> {
     let path = format!("executionPlan.scenarios.{name}");
     let mut case = input.clone();
@@ -712,12 +718,15 @@ fn enrich_case(ctx: &Value, name: &str, input: &Value) -> AiResult<Value> {
     case["effects"] = json!({"cashAfterMin":money(cash_lo),"cashAfterMax":money(cash_hi),"netProfitMin":if name=="tRoundTrip"{json!(money(profit_lo))}else{Value::Null},"netProfitMax":if name=="tRoundTrip"{json!(money(profit_hi))}else{Value::Null},"totalFeeMin":money(fee_lo),"totalFeeMax":money(fee_hi),"remainingQuantity":q.to_string(),"remainingAvailable":available.to_string(),"dilutedCostMin":cost(net_lo,q),"dilutedCostMax":cost(net_hi,q)});
     Ok(case)
 }
+#[cfg(test)]
 pub fn validate_and_enrich(body: &mut Value, s: &Snapshot) -> AiResult<()> {
     validate_and_enrich_mode(body, s, false)
 }
+#[cfg(test)]
 pub fn validate_and_enrich_partial(body: &mut Value, s: &Snapshot) -> AiResult<()> {
     validate_and_enrich_mode(body, s, true)
 }
+#[cfg(test)]
 fn branch_label(name: &str) -> &str {
     match name {
         "tRoundTrip" => "先卖后买做T",
@@ -726,6 +735,7 @@ fn branch_label(name: &str) -> &str {
         _ => "操作",
     }
 }
+#[cfg(test)]
 fn readable_branch_error(name: &str, message: &str) -> String {
     let prefix = format!("executionPlan.scenarios.{name}");
     let detail = message
@@ -747,6 +757,7 @@ fn readable_branch_error(name: &str, message: &str) -> String {
         .replace("notApplicable", "不适用");
     format!("{}方案不可用：{}。未修改模型给出的价格或股数，本分支不用于操作；原始内容可在模型原始输出中查看。", branch_label(name), detail.trim_start_matches('：'))
 }
+#[cfg(test)]
 fn validate_and_enrich_mode(body: &mut Value, s: &Snapshot, partial: bool) -> AiResult<()> {
     if !enabled(s) {
         body.as_object_mut().unwrap().remove("executionPlan");
@@ -857,6 +868,7 @@ fn validate_and_enrich_mode(body: &mut Value, s: &Snapshot, partial: bool) -> Ai
     body["executionPlan"] = plan;
     Ok(())
 }
+#[cfg(test)]
 pub fn mark_unavailable_claim(claim: &mut Value, reason: &str) {
     claim["action"] = json!("wait");
     claim["status"] = json!(if claim["operationType"] == "mediumLongTerm" {
@@ -877,6 +889,7 @@ pub fn mark_unavailable_claim(claim: &mut Value, reason: &str) {
     }
     claim["unavailableReason"] = json!(reason);
 }
+#[cfg(test)]
 pub fn t_can_be_funded(s: &Snapshot, body: &Value) -> bool {
     enabled(s)
         && context(s).is_some_and(|ctx| {
@@ -889,6 +902,7 @@ pub fn t_can_be_funded(s: &Snapshot, body: &Value) -> bool {
                 .is_ok()
         })
 }
+#[cfg(test)]
 pub fn sell_capacity(s: &Snapshot) -> Option<Decimal> {
     if enabled(s) {
         context(s)
@@ -898,6 +912,7 @@ pub fn sell_capacity(s: &Snapshot) -> Option<Decimal> {
     }
 }
 
+#[cfg(test)]
 pub fn level_ids(s: &Snapshot, eligible: bool) -> Vec<String> {
     context(s)
         .and_then(|ctx| {
@@ -911,7 +926,9 @@ pub fn level_ids(s: &Snapshot, eligible: bool) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub const RULES:&str="报告中的正文（结论、reason、trigger、invalidation、数量与资金说明）写给普通用户看。优先使用execution中的policyExplanation与tUnavailableReasons解释限制，不直接照抄policy、tFirst、tPercent、verifiedTCandidates、quoteIsCurrent=false等内部字段；JSON键名和L/E引用编号仍按协议保留。没有候选或报价不够新是等待操作的原因，不是模型接口故障；说明行情更新时间、限制是什么、用户下一步可以做什么。所有操作建议涉及关键价格时，用本次允许的L编号与实际价格说明（写作L编号=该编号对应的冻结价格），不能编造L编号或把成本当支撑；应用会按冻结价位显示L编号价格对照。signalConditions必须包含stabilization与weakening两条非空文字：分别明确下跌企稳条件与上涨动能不足条件，写清允许的L价位、观察周期/持续时长、价格表现及有资料支持的成交变化。每个买入/买回trigger要与企稳条件一致，每个卖出trigger要说明适用的动能不足或风险条件；不得只写企稳、反弹放量、上攻乏力；例如写连续几根分时K线不再创新低/收盘抬高，或触及压力价后几次冲高未创新高/回落。示例是待观察条件，不是已发生事实；缺分时、量能等必要数据时明确不能核验什么，不编造成交量/指标值，不声称实时条件已经满足。当前首选动作先说明未触发前持有或等待，再概括卖出价/数量、买入价/数量、保留底仓与取消条件。本次必须填写executionPlan量化预案。五类operations的conflictsWith数组只允许today/week/conservative/shortTerm/mediumLongTerm，entry/riskReduction/tRoundTrip是量化分支，不得放入conflictsWith；没有五类冲突则空数组。做T必须完整选一个verifiedTCandidates组合：sellId作为卖出lowId与highId，buyId作为买回lowId与highId，两步quantity均取候选quantity；不扩大区间、不改候选股数，没有候选则等待。entry若cashShortfall>0必须wait且steps=[]，不得用将来卖出回款为独立加仓融资。不要额外添加_check字段或任何示例之外的键，参数必须是合法JSON。采用冻结execution证据中的policy排序。保留底仓，tFirst优先评估先卖后买的同股数做T。必须有decision、preferredScenario、scenarios三个字段；scenarios仅含tRoundTrip/riskReduction/entry。每分支包含status、reason、invalidation、watchLevelIds、steps。价位只能从priceLevels选择L编号，不能编造价格；股数为正整数字符串，遵守reserveQuantity/maxTQuantity/maxReductionQuantity及整手。若价格与费用可支持，给出conditional条件预案，即使尚未到价也填写具体步骤，不将未触发等同资料不足。做T两步：sell的dependency=none；buy的dependency=sellFilled，股数相等，低卖价必须高于高买价且覆盖往返费用。先卖回款可以覆盖买回，不因初始余额少就否定做T；买回前必须确认卖出成交和券商可用回款。减仓一条sell，不许侵占底仓；加仓一条buy，dependency=cashAvailable，现款必须覆盖最高买价含费用。步骤必填side/lowId/highId/quantity/trigger/dependency。触发说明到价之外还需行情信号；invalidation写取消与不追价条件。余额异常、未知规则、未确认费率或行情过期必须等待并清空steps。非conditional步骤为空，watchLevelIds提供可观察价位。preferredScenario可为tRoundTrip/riskReduction/entry/wait；选非wait必须有conditional步骤。每个分支独立评估，不同时执行。费用、余额及摊薄成本由应用校验计算，不在工具参数中自行增加effects或context。decision要清楚说明先做什么、什么价位多少股、未成交/未买回如何处理；不能以泛泛观望替代已有依据的预案。量化预案是条件建议，不是已成交订单。五类operations文字与量化预案保持一致，说明未持仓/不能加仓/中长期资料不足等限制。";
+#[cfg(test)]
 pub fn constrain_tool(mut tool: Value, s: &Snapshot) -> Value {
     if !enabled(s) {
         return tool;
@@ -943,12 +960,14 @@ pub fn constrain_tool(mut tool: Value, s: &Snapshot) -> Value {
     }
     tool
 }
+#[cfg(test)]
 pub fn summary_shape(mut body: Value, reports: &[super::types::IndependentReport]) -> Value {
     if let Some(r) = reports.iter().find(|r| r.execution_plan.is_some()) {
         body["executionSelection"] = json!({"reportId":r.id,"scenario":r.execution_plan.as_ref().unwrap()["preferredScenario"],"decision":"选择已有完整预案，说明首选动作和失效条件"});
     }
     body
 }
+#[cfg(test)]
 pub fn select_summary(
     body: &mut Value,
     reports: &[super::types::IndependentReport],
@@ -1001,6 +1020,7 @@ pub fn select_summary(
     Ok(())
 }
 
+#[cfg(test)]
 fn add_headline(plan: &mut Value) {
     let name = plan["preferredScenario"].as_str().unwrap_or("wait");
     let ctx = &plan["context"];

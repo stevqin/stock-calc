@@ -101,6 +101,7 @@ pub async fn ai_test_model(
                 max_tokens: 64,
                 disable_thinking: true,
                 json_mode: false,
+                report_mode: false,
                 structured_tool: None,
             },
             &CallContext {
@@ -171,15 +172,16 @@ fn public_source_url(raw: &str) -> AiResult<String> {
         || url.scheme() != "https"
         || !url.username().is_empty()
         || url.password().is_some()
-        || !matches!(
-            url.host_str(),
-            Some(
-                "so.eastmoney.com"
-                    | "www.cninfo.com.cn"
-                    | "static.cninfo.com.cn"
-                    | "www.sse.com.cn"
-            )
-        )
+        || !(super::news::valid_article_url(raw)
+            || matches!(
+                url.host_str(),
+                Some(
+                    "so.eastmoney.com"
+                        | "www.cninfo.com.cn"
+                        | "static.cninfo.com.cn"
+                        | "www.sse.com.cn"
+                )
+            ))
     {
         return Err(AiError::new(
             "invalidSource",
@@ -206,6 +208,19 @@ pub fn ai_open_public_source(url: String) -> AiResult<()> {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+    #[test]
+    fn opens_only_exact_public_news_article_urls() {
+        assert!(
+            public_source_url("https://finance.eastmoney.com/a/202610191234567890.html").is_ok()
+        );
+        for value in [
+            "https://finance.eastmoney.com/redirect?url=https://evil.test",
+            "https://finance.eastmoney.com:443/a/123.html",
+            "https://finance.eastmoney.com.evil.test/a/123.html",
+        ] {
+            assert!(public_source_url(value).is_err());
+        }
+    }
     #[test]
     fn public_links_require_https_exact_domain_and_no_credentials() {
         assert!(public_source_url("https://so.eastmoney.com/web/s?keyword=600519").is_ok());

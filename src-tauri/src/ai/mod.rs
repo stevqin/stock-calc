@@ -14,4 +14,9 @@ pub mod analysis;
 mod execution;
 pub mod prompt_materials;
 pub mod report_v2;
+#[cfg(test)]
 mod structured_output;
+
+pub mod news;
+
+pub mod account_brief;

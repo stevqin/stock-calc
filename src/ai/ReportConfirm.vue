@@ -10,11 +10,30 @@ defineProps<{
 const emit = defineEmits<{ confirm: []; cancel: [] }>();
 const panel = ref<HTMLElement>();
 const previous = document.activeElement as HTMLElement | null;
+const ownerWindow = previous?.closest(".ai-tool-window") as HTMLElement | null;
 onMounted(async () => {
   await nextTick();
   panel.value?.querySelector<HTMLButtonElement>("[data-cancel-purge]")?.focus();
 });
-onBeforeUnmount(() => previous?.focus());
+onBeforeUnmount(() => {
+  void nextTick(() => {
+    if (
+      previous?.isConnected &&
+      previous.getClientRects().length &&
+      !previous.matches(":disabled") &&
+      !previous.closest('[inert], [aria-hidden="true"]')
+    )
+      previous.focus();
+    else if (
+      ownerWindow?.isConnected &&
+      ownerWindow.getClientRects().length &&
+      !ownerWindow.closest('[aria-hidden="true"]')
+    )
+      ownerWindow
+        .querySelector<HTMLButtonElement>("[data-tool-close]")
+        ?.focus();
+  });
+});
 function keys(e: KeyboardEvent) {
   if (e.key === "Escape") {
     e.preventDefault();

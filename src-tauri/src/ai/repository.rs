@@ -203,7 +203,11 @@ pub fn append_summary(
             .find(|r| r.id == *id)
             .ok_or_else(|| invalid("汇总输入报告不存在"))?;
         if r.snapshot_id != summary.snapshot_id
-            || r.validation.get("valid").and_then(|v| v.as_bool()) != Some(true)
+            || if summary.validation["format"] == "markdown" {
+                r.raw_output.trim().is_empty()
+            } else {
+                r.validation.get("valid").and_then(|v| v.as_bool()) != Some(true)
+            }
             || !models.insert(&r.model_snapshot.id)
         {
             return Err(invalid("汇总输入无效、跨快照或同一模型重复"));
@@ -426,6 +430,27 @@ mod tests {
             disagreements: json!([]),
             validation: json!({"valid":true}),
         }
+    }
+    #[test]
+    fn markdown_summary_can_use_saved_prose_previously_rejected_by_json_checks() {
+        let mut db = setup();
+        let t = create_task(&mut db, &request("markdown")).unwrap();
+        save_snapshot(&mut db, &t.id, &fixture()).unwrap();
+        let mut r = report();
+        r.raw_output = "正文没有固定字段，L1=12.30，卖200股 **".into();
+        r.validation = json!({"valid":false,"error":"旧JSON校验失败"});
+        save_report(&mut db, &t.id, &r).unwrap();
+        let mut v = summary(1);
+        v.windows = json!({"markdown":"# 综合结论\n继续持有底仓"});
+        v.validation = json!({"format":"markdown","valid":true});
+        append_summary(&mut db, &t.id, &v).unwrap();
+        let saved = get_task(&db, &t.id).unwrap();
+        assert_eq!(saved.reports[0].raw_output, r.raw_output);
+        assert_eq!(saved.summary_versions[0].windows, v.windows);
+        let mut crossed = summary(2);
+        crossed.validation = v.validation.clone();
+        crossed.snapshot_id = "foreign".into();
+        assert!(append_summary(&mut db, &t.id, &crossed).is_err());
     }
     #[test]
     fn trash_hides_and_restores_all_versions_then_purge_removes_owned_data() {

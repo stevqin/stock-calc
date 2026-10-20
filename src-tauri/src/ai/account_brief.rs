@@ -3,7 +3,7 @@ use rust_decimal::{Decimal, RoundingStrategy};
 use serde_json::{json, Value};
 use std::str::FromStr;
 
-pub const READING_GUIDE: &str = "数据阅读说明：所有金额均为人民币元，股票数量为股、ETF数量为份；价格为元/股或元/份。数字字符串用于保留精度，null/字段缺失表示未知而不是0。position.quantity是当前持有数量，available是此刻按记录可卖数量；cost/averageCost是剩余持仓FIFO总成本/均价，netInvestment是本轮买入与期初投入减去卖出净回款，dilutedCost是netInvestment除以当前数量（本轮账面回本价，不是技术支撑，也未扣未来卖出费）。本轮以日终清仓分界，同日先清后买仍属同一轮。position.trades逐笔保留本轮记录；buy/sell/opening分别是买入/卖出/期初持仓，期初不是当日新买。若记录与持仓数量不一致须提示核对，不编造缺失成交。fees.cash对买入是含费支出、对卖出是扣费到账；fees.total是这笔费用，缺费用不得按0处理，feeSource区分实录与估算，feeConfirmed仅是费率配置确认，不是券商实盘核对。feeProfile.commissionWan是万分比，stampPercent/transferPercent是百分比，minimum是最低佣金元；按给定配置，不使用固定费率。cash.balance是按已录入账户流水算出的尚可用于买入的现金，是全账户共享额度，不是本股专属预算、总资产或持仓市值；未经券商核对，未反映未录入流水或券商冻结资金，还需预留买入费用；initialized=false、hasWarnings=true或负余额时资金待核实，不据此给出可执行买入数量。accountSummary是上述原始记录的算术解释，不是交易指令。行情columns/rows为无损表格，按列名顺序解读；日线date为交易日期，分时session.date加time(HHMM)是北京时间，ISO时间按标注时区解读。volume/amount沿用数据源原值，未标明单位或累计/增量口径时不得擅自换算或把累计量当每分钟成交量。sourceStates说明数据时效和缺失，旧报价只能作对应时点估值。新闻fullText是实际获取的网页文字正文，图片、PDF附件及交互图表未解析，不据未提供附件推断数字；没有fullText的标题、检索摘要不构成事件事实依据，禁止冒充已阅读原文。正文可能含后续更新，不是交易时点的历史版本；公告titleOnly仅有标题链接，不能据标题编造正文或确定事件影响。";
+pub const READING_GUIDE: &str = "数据阅读说明：所有金额均为人民币元，股票数量为股、ETF数量为份；价格为元/股或元/份。数字字符串用于保留精度，null/字段缺失表示未知而不是0。position.quantity是当前持有数量，available是此刻按记录可卖数量；cost/averageCost是剩余持仓FIFO总成本/均价，netInvestment是本轮买入与期初投入减去卖出净回款，dilutedCost是netInvestment除以当前数量（本轮账面回本价，不是技术支撑，也未扣未来卖出费）。本轮以日终清仓分界，同日先清后买仍属同一轮。position.trades逐笔保留本轮记录；buy/sell/opening分别是买入/卖出/期初持仓，期初不是当日新买。若记录与持仓数量不一致须提示核对，不编造缺失成交。fees.cash对买入是含费支出、对卖出是扣费到账；fees.total是这笔费用，缺费用不得按0处理，feeSource区分实录与估算，feeConfirmed仅是费率配置确认，不是券商实盘核对。feeProfile.commissionWan是万分比，stampPercent/transferPercent是百分比，minimum是最低佣金元；按给定配置，不使用固定费率。cash.balance就是截至快照时点用户当前剩余可操作、可用于买入的资金，可直接作为买入预算。按建议买价、交易费用和整手规则计算可买数量，买入金额加费用不得超过余额；不要另扣假设的冻结资金，也不得仅因数据来自用户账户记录、未接入券商或全账户共享就将买入股数标为待核实。全账户共享表示多股同时买入不能重复占用这笔资金，不妨碍为本股计算买入数量；余额不是总资产或持仓市值。initialized=false、hasWarnings=true或负余额时资金待核实，不据此给出可执行买入数量。accountSummary是上述原始记录的算术解释，不是交易指令。行情columns/rows为无损表格，按列名顺序解读；日线date为交易日期，分时session.date加time(HHMM)是北京时间，ISO时间按标注时区解读。volume/amount沿用数据源原值，未标明单位或累计/增量口径时不得擅自换算或把累计量当每分钟成交量。sourceStates说明数据时效和缺失，旧报价只能作对应时点估值。新闻fullText是实际获取的网页文字正文，图片、PDF附件及交互图表未解析，不据未提供附件推断数字；没有fullText的标题、检索摘要不构成事件事实依据，禁止冒充已阅读原文。正文可能含后续更新，不是交易时点的历史版本；公告titleOnly仅有标题链接，不能据标题编造正文或确定事件影响。";
 
 fn number(v: &Value) -> Option<Decimal> {
     let text = v.as_str()?;
@@ -137,7 +137,22 @@ pub fn build(s: &Snapshot) -> Value {
     } else {
         facts.push("未提供持仓，不能假设用户空仓，也不能判断被套或盈利。".into());
     }
-    facts.push(match balance {Some(b)=>format!("可用于买入的现金（账户记录值）为{}元，{}；这是全账户共享现金，不等于总资产或持仓市值，须预留费用并核对券商冻结资金。",money(b),if ready{"可作预算参考，未与券商核对"}else{"资金待核实，不能据此确定买入股数"}),None=>"未提供可用于买入的现金，不能假设资金充足或可通过融资补足。".into()});
+    facts.push(match balance {
+        Some(b) => format!(
+            "当前剩余可用于买入的资金为{}元，{}；全账户共享，同步买入多只股票时合计不能超出余额。",
+            money(b),
+            if ready {
+                "可直接作为买入预算，按买价及交易费用计算可买数量"
+            } else if b < Decimal::ZERO {
+                "余额为负，需核对账户流水，暂不能据此计算可买数量"
+            } else if c["initialized"] != true {
+                "账户初始资金尚未设置，需先补全"
+            } else {
+                "账户流水存在资金异常提示，需先核对异常记录"
+            }
+        ),
+        None => "未提供可用于买入的现金，不能假设资金充足或可通过融资补足。".into(),
+    });
     if let Some(price) = price {
         facts.push(format!(
             "以下盈亏按采集参考价{}元估值，报价时间{}；{}。",
@@ -183,7 +198,7 @@ pub fn build(s: &Snapshot) -> Value {
                 .unwrap_or_else(|| "部分费用缺失，不能把费用当0，也不能确认做T净收益".into())
         ));
     }
-    json!({"basedOnEvidenceIds":s.evidence.iter().filter(|e|["position","cash","quote"].contains(&e.kind.as_str())).map(|e|e.id.clone()).collect::<Vec<_>>(),"currency":"人民币元","quantityUnit":unit,"asOf":s.cutoff_at,"facts":facts,"cash":{"label":"可用于买入的现金（按已录入账户记录）","balance":balance.map(money),"budgetAvailable":ready,"brokerVerified":false},"position":{"quantity":q.map(|v|v.normalize().to_string()),"available":available.map(|v|v.normalize().to_string()),"fifoRemainingCost":cost.map(money),"roundNetInvestment":net.map(money)},"profitAndLoss":{"state":state,"referencePrice":s.reference_price,"quoteTime":s.source_states["quoteTime"],"quoteIsCurrent":s.source_states["quoteIsCurrent"],"fifoFloating":floating.map(money),"fifoFloatingPct":pct.map(money),"roundTotal":round.map(money),"roundRealized":realized.map(money),"roundBreakEvenPrice":break_even.map(precise),"recoveryToRoundBreakEvenPct":recovery.map(money),"recoveryMeaning":"从参考价上涨多少百分比才达到本轮账面回本价；不是亏损百分比，不含未来卖出费用"},"round":{"start":p["roundStart"],"tradeCount":trades.len(),"boughtQuantity":if trades.is_empty(){None}else{sum(trades,"buy").map(|v|v.normalize().to_string())},"soldQuantity":if trades.is_empty(){None}else{sum(trades,"sell").map(|v|v.normalize().to_string())},"knownFees":fees.map(money),"feesComplete":fees_complete},"reviewBoundary":"复盘必须指出原始成交ID、时间、买卖方向、价格和数量，区分可核对事实与可能的决策问题。只能用当时已知的记录、计划和新闻评估，后来涨跌只作事后表现；未提供当时计划、行情或止损条件时，不能断言追涨杀跌、违反纪律或某笔必然失误。不得因为当前亏损就判定交易错误；证据不足明确无法判断。"})
+    json!({"basedOnEvidenceIds":s.evidence.iter().filter(|e|["position","cash","quote"].contains(&e.kind.as_str())).map(|e|e.id.clone()).collect::<Vec<_>>(),"currency":"人民币元","quantityUnit":unit,"asOf":s.cutoff_at,"facts":facts,"cash":{"label":"当前可用于买入的资金","balance":balance.map(money),"budgetAvailable":ready,"meaning":"当前剩余可操作的买入资金"},"position":{"quantity":q.map(|v|v.normalize().to_string()),"available":available.map(|v|v.normalize().to_string()),"fifoRemainingCost":cost.map(money),"roundNetInvestment":net.map(money)},"profitAndLoss":{"state":state,"referencePrice":s.reference_price,"quoteTime":s.source_states["quoteTime"],"quoteIsCurrent":s.source_states["quoteIsCurrent"],"fifoFloating":floating.map(money),"fifoFloatingPct":pct.map(money),"roundTotal":round.map(money),"roundRealized":realized.map(money),"roundBreakEvenPrice":break_even.map(precise),"recoveryToRoundBreakEvenPct":recovery.map(money),"recoveryMeaning":"从参考价上涨多少百分比才达到本轮账面回本价；不是亏损百分比，不含未来卖出费用"},"round":{"start":p["roundStart"],"tradeCount":trades.len(),"boughtQuantity":if trades.is_empty(){None}else{sum(trades,"buy").map(|v|v.normalize().to_string())},"soldQuantity":if trades.is_empty(){None}else{sum(trades,"sell").map(|v|v.normalize().to_string())},"knownFees":fees.map(money),"feesComplete":fees_complete},"reviewBoundary":"复盘必须指出原始成交ID、时间、买卖方向、价格和数量，区分可核对事实与可能的决策问题。只能用当时已知的记录、计划和新闻评估，后来涨跌只作事后表现；未提供当时计划、行情或止损条件时，不能断言追涨杀跌、违反纪律或某笔必然失误。不得因为当前亏损就判定交易错误；证据不足明确无法判断。"})
 }
 
 #[cfg(test)]
@@ -194,6 +209,52 @@ mod tests {
     fn snapshot(price: Value, cost: &str, net: &str) -> Snapshot {
         let ev = |kind: &str, content: Value| json!({"id":kind,"securityId":"sh600519","kind":kind,"source":"测试","url":null,"publishedAt":null,"timePrecision":"exact","eventAt":null,"collectedAt":"2026-10-19T06:00:00Z","content":content.to_string(),"contentHash":"test","availability":"userProvided"});
         serde_json::from_value(json!({"id":"snapshot","security":{"id":"sh600519","market":"sh","code":"600519","name":"测试股份","asset":"stock"},"cutoffAt":"2026-10-19T06:00:00Z","frozenAt":"2026-10-19T06:00:01Z","referencePrice":price,"windows":{},"series":{},"indicators":{},"sourceStates":{"quoteIsCurrent":true,"quoteTime":"20261019140000"},"ruleVersions":{},"evidence":[ev("cash",json!({"balance":"1000.00","initialized":true,"hasWarnings":false})),ev("position",json!({"quantity":"100","available":"80","cost":cost,"netInvestment":net,"roundStart":"2026-10-12T02:00:00Z","trades":[{"id":"b","kind":"buy","quantity":"100","price":"10","time":"2026-10-12T02:00:00Z","fees":{"total":"5.00"}},{"id":"s","kind":"sell","quantity":"20","price":"11","time":"2026-10-13T02:00:00Z","fees":{"total":"5.11"}}]}))]})).unwrap()
+    }
+    #[test]
+    fn available_cash_is_a_buying_budget_even_with_legacy_summary() {
+        let mut s = snapshot(json!("10"), "1000", "1000");
+        let cash = s.evidence.iter_mut().find(|e| e.kind == "cash").unwrap();
+        cash.content =
+            json!({"balance":"7055.26","initialized":true,"hasWarnings":false}).to_string();
+        let mut legacy = cash.clone();
+        legacy.kind = "accountSummary".into();
+        legacy.content =
+            json!({"cash":{"brokerVerified":false},"facts":["须核对券商冻结资金"]}).to_string();
+        s.evidence.push(legacy);
+        let before = s.clone();
+        let brief = build(&s);
+        assert_eq!(brief["cash"]["balance"], "7055.26");
+        assert_eq!(brief["cash"]["budgetAvailable"], true);
+        assert!(brief["cash"].get("brokerVerified").is_none());
+        assert!(brief.to_string().contains("可直接作为买入预算"));
+        for input in [
+            super::super::prompt_materials::snapshot(&s),
+            super::super::prompt_materials::summary_snapshot(&s),
+        ] {
+            assert_eq!(input["accountSummary"]["cash"], brief["cash"]);
+            assert!(!input["accountSummary"].to_string().contains("冻结资金"));
+        }
+        assert_eq!(s, before);
+    }
+    #[test]
+    fn zero_cash_is_known_but_missing_or_invalid_cash_is_not_a_budget() {
+        for (balance, initialized, warning, ready) in [
+            (json!("0.00"), true, false, true),
+            (Value::Null, true, false, false),
+            (json!("-1.00"), true, false, false),
+            (json!("7055.26"), false, false, false),
+            (json!("7055.26"), true, true, false),
+        ] {
+            let mut s = snapshot(json!("10"), "1000", "1000");
+            s.evidence
+                .iter_mut()
+                .find(|e| e.kind == "cash")
+                .unwrap()
+                .content =
+                json!({"balance":balance,"initialized":initialized,"hasWarnings":warning})
+                    .to_string();
+            assert_eq!(build(&s)["cash"]["budgetAvailable"], ready);
+        }
     }
     #[test]
     fn distinguishes_remaining_floating_loss_from_profitable_round() {

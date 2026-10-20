@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DateTimeField from "./components/DateTimeField.vue";
+import PeriodProfitChart from "./components/PeriodProfitChart.vue";
 import {
   computed,
   ref,
@@ -138,6 +139,10 @@ const neededYears = computed(() => {
   for (const r of [
     validRange.value ? range.value : calendarRange.value,
     calendarRange.value,
+    {
+      start: firstDate.value,
+      end: validRange.value ? range.value.end : today.value,
+    },
   ]) {
     const start = Math.max(
       Number(r.start.slice(0, 4)),
@@ -469,41 +474,11 @@ const contributions = computed(() => {
     return new Decimal(left).comparedTo(right) * direction;
   });
 });
-const chart = computed(() => {
-  const days = analysis.value.days.filter(
-    (d) => d.date >= range.value.start && d.date <= range.value.end,
-  );
-  let total = new Decimal(0),
-    missing = false;
-  const points = days
-    .map((day, i) => {
-      if (day.profit === null) missing = true;
-      if (missing) return null;
-      total = total.plus(day.profit!);
-      return {
-        date: day.date,
-        value: total.toNumber(),
-        x: 52 + (i / Math.max(days.length - 1, 1)) * 648,
-      };
-    })
-    .filter((p): p is NonNullable<typeof p> => p !== null);
-  const min = Math.min(0, ...points.map((p) => p.value)),
-    max = Math.max(0, ...points.map((p) => p.value));
-  const spread = max - min || 1;
-  const y = (value: number) => 170 - ((value - min) / spread) * 136;
-  return {
-    points: points.map((p) => ({ ...p, y: y(p.value) })),
-    path: points
-      .map((p, i) => `${i ? "L" : "M"}${p.x},${y(p.value)}`)
-      .join(" "),
-    min,
-    max,
-    zero: y(0),
-    missing,
-    start: days[0]?.date,
-    end: days.at(-1)?.date,
-  };
-});
+const chartDays = computed(() =>
+  analysis.value.days.filter(
+    (day) => day.date >= range.value.start && day.date <= range.value.end,
+  ),
+);
 </script>
 
 <template>
@@ -581,7 +556,7 @@ const chart = computed(() => {
             <b class="range-return" :class="tone(summary.returnRate)">{{
               percent(summary.returnRate)
             }}</b></span
-          ><small>含持仓涨跌及利息等收入，已扣交易费用</small>
+          ><small>含首日收益、持仓涨跌及利息等收入，已扣交易费用</small>
         </div>
         <div class="pnl-metric">
           <span>区间卖出盈亏</span
@@ -654,52 +629,15 @@ const chart = computed(() => {
         </ul>
       </details>
       <div class="pnl-insights">
-        <section class="pnl-panel">
-          <header>
-            <h3>累计盈亏</h3>
-            <span>所选区间 · 元</span>
-          </header>
-          <svg
-            v-if="chart.points.length && hasRecords"
-            class="pnl-trend"
-            viewBox="0 0 720 204"
-          >
-            <line
-              x1="52"
-              x2="700"
-              :y1="chart.zero"
-              :y2="chart.zero"
-              class="pnl-chart-zero"
-            />
-            <text x="46" y="30" text-anchor="end">
-              {{ money(String(chart.max)) }}
-            </text>
-            <text x="46" y="174" text-anchor="end">
-              {{ money(String(chart.min)) }}
-            </text>
-            <path
-              :d="chart.path"
-              :class="tone(String(chart.points.at(-1)?.value ?? 0))"
-            />
-            <circle
-              v-for="p in chart.points"
-              :key="p.date"
-              :cx="p.x"
-              :cy="p.y"
-              r="3"
-            >
-              <title>
-                {{ p.date }} 累计 {{ money(String(p.value), true) }} 元
-              </title>
-            </circle>
-            <text x="52" y="199">{{ chart.start }}</text>
-            <text x="700" y="199" text-anchor="end">{{ chart.end }}</text>
-          </svg>
-          <p v-else class="pnl-empty">暂无完整的收益曲线数据</p>
-          <p v-if="chart.missing" class="pnl-note">
-            曲线截至首个收益缺失日，不跨越数据缺口。
-          </p>
-        </section>
+        <PeriodProfitChart
+          :days="chartDays"
+          :range-start="range.start"
+          :range-end="range.end"
+          :has-records="hasRecords"
+          :entries="account.entries"
+          :cash-entries="account.cashEntries ?? []"
+          :security-names="Object.fromEntries(names)"
+        />
         <section class="pnl-panel pnl-contribution">
           <header>
             <h3>证券盈亏贡献</h3>

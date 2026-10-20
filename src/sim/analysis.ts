@@ -25,6 +25,13 @@ export interface AnalysisDay {
   rateReason: string;
   date: string;
   profit: string | null;
+  /** Ledger-to-date profit: end assets less initial capital, external net flows and opening inventory cost. */
+  cumulativeProfit: string | null;
+  /** End-of-day recorded cash plus holdings at valid daily marks; independent of profit completeness. */
+  cash: string;
+  marketValue: string | null;
+  assets: string | null;
+  assetReasons: string[];
   realized: string;
   fees: string;
   income: string;
@@ -168,6 +175,8 @@ export function analyzeAccount(
   const states = new Map<string, State>();
   const active = new Set<string>();
   let previousAccountRealized = D(0);
+  let cashBalance = D(account.initialCash);
+  let investedCapital = D(account.initialCash);
   let tradeIndex = 0,
     cashIndex = 0;
   for (let date = start; date <= today; date = nextDate(date)) {
@@ -184,11 +193,22 @@ export function analyzeAccount(
     while (cashIndex < cash.length && cash[cashIndex].date === date) {
       const event = cash[cashIndex++];
       hasCash = true;
+      cashBalance =
+        event.kind === "withdraw"
+          ? cashBalance.minus(event.amount)
+          : cashBalance.plus(event.amount);
       if (["interest", "repo-interest", "other-income"].includes(event.kind))
         income = income.plus(event.amount);
+      else
+        investedCapital =
+          event.kind === "withdraw"
+            ? investedCapital.minus(event.amount)
+            : investedCapital.plus(event.amount);
     }
     const contributions: AnalysisContribution[] = [];
     const reasons: string[] = [];
+    const assetReasons: string[] = [];
+    let marketValue = D(0);
     const rest = isRest(date);
     let startValue = D(0),
       netBuy = D(0);
@@ -217,6 +237,7 @@ export function analyzeAccount(
         if (e.kind === "opening") {
           opening = true;
           const cost = quantity.mul(e.price);
+          investedCapital = investedCapital.plus(cost);
           state.quantity = state.quantity.plus(quantity);
           state.cycleProfit = state.cycleProfit.minus(cost);
           const available = D(e.available ?? e.quantity);
@@ -292,6 +313,18 @@ export function analyzeAccount(
           ? quote.latest
           : closes?.get(date);
       const previousPrice = closes?.get(previousSession);
+      cashBalance = cashBalance.plus(flow);
+      if (state.quantity.gt(0)) {
+        // A rest day may reuse only its immediately preceding exchange session.
+        // A missing weekday mark must not be bridged using an arbitrarily old close.
+        const assetPrice =
+          endPrice ??
+          (rest && !own.length ? closes?.get(previousSession) : undefined);
+        if (assetPrice)
+          marketValue = marketValue.plus(cents(state.quantity.mul(assetPrice)));
+        else assetReasons.push(`${id}：缺少 ${date} 有效持仓估值行情`);
+      }
+
       let profit: string | null;
       if (opening) {
         profit = null;
@@ -413,6 +446,13 @@ export function analyzeAccount(
       profit: missing
         ? null
         : cents(contributions.reduce((n, c) => n.plus(c.profit!), income)),
+      cumulativeProfit: assetReasons.length
+        ? null
+        : cents(cashBalance.plus(marketValue).minus(investedCapital)),
+      cash: cents(cashBalance),
+      marketValue: assetReasons.length ? null : cents(marketValue),
+      assets: assetReasons.length ? null : cents(cashBalance.plus(marketValue)),
+      assetReasons,
       realized: cents(dayRealized),
       fees: cents(contributions.reduce((n, c) => n.plus(c.fees), D(0))),
       income: cents(income),

@@ -220,3 +220,90 @@ it("DeepSeek预设提供官方地址和关闭思考说明", async () => {
     w.findAll("option").some((o) => o.attributes("value") === "deepseek-flash"),
   ).toBe(true);
 });
+
+it("keeps unsaved model changes until the user explicitly discards them", async () => {
+  const f = fixture();
+  const w = mount(ModelSettings, { props: { client: f.client } });
+  await flushPromises();
+  await w.get('button[aria-label="编辑模型一"]').trigger("click");
+  expect(w.get('[role="dialog"]').attributes("aria-modal")).toBe("true");
+  await w.get('input[aria-label="显示名称"]').setValue("尚未保存的名称");
+  await w.get('button[aria-label="关闭模型编辑"]').trigger("click");
+  expect(w.get('[role="dialog"]').text()).toContain("尚未保存");
+  expect(
+    (w.get('input[aria-label="显示名称"]').element as HTMLInputElement).value,
+  ).toBe("尚未保存的名称");
+  await w.get('button[data-action="discard-editor"]').trigger("click");
+  expect(w.find('[role="dialog"]').exists()).toBe(false);
+  expect(f.saves).toHaveLength(0);
+  w.unmount();
+});
+it("shows connection progress and results next to the tested model without auto calls", async () => {
+  const f = fixture();
+  let finish!: (value: {
+    modelId: string;
+    attempts: number;
+    usage: null;
+  }) => void;
+  const test = vi.fn(
+    () =>
+      new Promise<{ modelId: string; attempts: number; usage: null }>(
+        (resolve) => {
+          finish = resolve;
+        },
+      ),
+  );
+  f.client.testModel = test;
+  const w = mount(ModelSettings, { props: { client: f.client } });
+  await flushPromises();
+  expect(test).not.toHaveBeenCalled();
+  await w.get('button[aria-label="测试模型一连接"]').trigger("click");
+  expect(w.get(".ai-model-row").text()).toContain("正在测试");
+  finish({ modelId: "one", attempts: 1, usage: null });
+  await flushPromises();
+  expect(w.get(".ai-model-row").text()).toContain("连接成功");
+  expect(test).toHaveBeenCalledTimes(1);
+  w.unmount();
+});
+it("preserves pending default selections when saving a model", async () => {
+  const f = fixture();
+  const w = mount(ModelSettings, { props: { client: f.client } });
+  await flushPromises();
+  await w.get(".ai-default-list input").setValue(false);
+  expect(w.get(".ai-defaults").text()).toContain("未保存");
+  await w.get('button[aria-label="编辑模型一"]').trigger("click");
+  await w.get('input[aria-label="显示名称"]').setValue("模型一改名");
+  await w.get("form").trigger("submit");
+  await flushPromises();
+  expect(
+    (w.get(".ai-default-list input").element as HTMLInputElement).checked,
+  ).toBe(false);
+  expect((await f.client.getDefaults()).participantIds).toEqual(["one"]);
+  w.unmount();
+});
+
+it("moves keyboard focus into discard confirmation and back into the editor", async () => {
+  const f = fixture();
+  const w = mount(ModelSettings, {
+    props: { client: f.client },
+    attachTo: document.body,
+  });
+  await flushPromises();
+  await w.get('button[aria-label="编辑模型一"]').trigger("click");
+  await w.get('input[aria-label="显示名称"]').setValue("未保存");
+  const cancel = w
+    .findAll(".ai-editor-actions button")
+    .find((button) => button.text() === "取消")!;
+  (cancel.element as HTMLButtonElement).focus();
+  await cancel.trigger("click");
+  await flushPromises();
+  expect(document.activeElement?.getAttribute("data-action")).toBe(
+    "continue-editor",
+  );
+  await w.get(".ai-editor-discard button").trigger("click");
+  await flushPromises();
+  expect(
+    w.get('[role="dialog"]').element.contains(document.activeElement),
+  ).toBe(true);
+  w.unmount();
+});

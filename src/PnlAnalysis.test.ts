@@ -247,7 +247,7 @@ describe("盈亏分析日历", () => {
     await flushPromises();
     expect(wrapper.find(".pnl-loading").exists()).toBe(false);
     expect(wrapper.get(".pnl-total strong").text()).toBe("+299.00");
-    expect(wrapper.find(".pnl-trend path").exists()).toBe(true);
+    expect(wrapper.find(".pnl-profit-plot path").exists()).toBe(true);
     marketQuotes.sh510300 = {
       market: "sh",
       code: "510300",

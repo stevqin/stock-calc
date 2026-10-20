@@ -571,7 +571,7 @@ const availabilityLabels: Record<string, string> = {
   titleOnly: "仅标题与链接",
   excerpt: "旧报告搜索摘要，非全文",
   fullText: "已读取网页正文",
-  derived: "按账户记录计算，未核对券商",
+  derived: "根据账户记录计算",
   userProvided: "手动补充，未经核验",
   sourceLinksOnly: "仅来源链接",
   unavailable: "未获取",
@@ -1556,7 +1556,7 @@ onBeforeUnmount(() => {
                     :unit="quantityUnit"
                   />
                   <p class="ai-field-hint">
-                    发送本股记录与全账户现金余额，并随报告保存。现金按已录入账户记录计算，未与券商核对，买入还需预留费用。
+                    发送本股持仓、本轮交易和当前可用于买入的资金，并随报告保存。AI 按这笔资金、买入价格和交易费用计算可买数量。
                   </p></template
                 >
                 <p v-else class="ai-field-hint">
@@ -2028,7 +2028,7 @@ onBeforeUnmount(() => {
                   这份报告未包含本股持仓资料。
                 </p>
                 <p class="ai-field-hint">
-                  这里的现金是报告保存时按账户记录计算的买入预算，未与券商可用资金核对，且未预留将来买入费用。
+                  这里显示报告生成时剩余可用于买入的资金；买入金额与交易费用合计不能超过这笔资金。
                 </p>
               </section>
               <section class="ai-material-section ai-source-details">

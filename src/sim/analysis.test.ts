@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   analyzeAccount,
@@ -572,4 +573,151 @@ it("uses a documented suspension valuation without inventing a traded daily bar"
     "-43.00",
   );
   expect(prices.bars).toHaveLength(2);
+});
+
+describe("daily book assets", () => {
+  it("matches cash plus marked holdings, keeps transfers out of profit and applies fees once", () => {
+    const a = account([
+      trade("2026-08-24", "buy", "10"),
+      trade("2026-08-25", "sell", "11"),
+    ]);
+    a.initialCash = "2000";
+    a.cashEntries = [
+      {
+        id: "in",
+        kind: "deposit",
+        amount: "500",
+        date: "2026-08-25",
+        time: "2026-08-25T01:00:00.000Z",
+        note: "",
+      },
+      {
+        id: "out",
+        kind: "withdraw",
+        amount: "100",
+        date: "2026-08-26",
+        time: "2026-08-26T01:00:00.000Z",
+        note: "",
+      },
+      {
+        id: "income",
+        kind: "interest",
+        amount: "5",
+        date: "2026-08-26",
+        time: "2026-08-26T02:00:00.000Z",
+        note: "",
+      },
+    ];
+    const result = analyzeAccount(
+      a,
+      { [id]: bars({ "2026-08-24": "10", "2026-08-25": "11" }) },
+      {},
+      "2026-08-26",
+    );
+    expect(
+      result.days.map((day) => ({
+        cash: day.cash,
+        marketValue: day.marketValue,
+        assets: day.assets,
+      })),
+    ).toEqual([
+      { cash: "999.00", marketValue: "1000.00", assets: "1999.00" },
+      { cash: "2598.00", marketValue: "0.00", assets: "2598.00" },
+      { cash: "2503.00", marketValue: "0.00", assets: "2503.00" },
+    ]);
+    expect(sum(result).profit).toBe("103.00");
+    expect(result.days.at(-1)!.cash).toBe(replay(a, "2026-08-26").cash);
+  });
+  it("allows known assets on an opening snapshot, gaps missing valuations, then recovers independently of profit", () => {
+    const a = account([trade("2026-08-24", "opening", "10")]);
+    a.initialCash = "1000";
+    const result = analyzeAccount(
+      a,
+      { [id]: bars({ "2026-08-24": "12", "2026-08-26": "11" }) },
+      {},
+      "2026-08-26",
+    );
+    expect(result.days.map((day) => day.assets)).toEqual([
+      "2200.00",
+      null,
+      "2100.00",
+    ]);
+    expect(result.days.map((day) => day.profit)).toEqual([null, null, null]);
+    expect(result.days[1].assetReasons.join(" ")).toContain("2026-08-25");
+  });
+  it("carries a proven rest-day close but never uses an older weekday value across a missing session", () => {
+    const a = account([trade("2026-08-28", "opening", "10")]);
+    const known = analyzeAccount(
+      a,
+      { [id]: bars({ "2026-08-28": "12" }) },
+      {},
+      "2026-08-30",
+    );
+    expect(known.days.map((day) => day.assets)).toEqual([
+      "1200.00",
+      "1200.00",
+      "1200.00",
+    ]);
+    const missing = analyzeAccount(
+      a,
+      { [id]: bars({ "2026-08-28": "12" }) },
+      {},
+      "2026-09-05",
+    );
+    expect(
+      missing.days.find((day) => day.date === "2026-09-05")!.assets,
+    ).toBeNull();
+  });
+});
+
+it("values cumulative profit against net capital, preserving opening costs and excluding transfers", () => {
+  const a = account([
+    trade("2026-08-24", "opening", "10"),
+    trade("2026-08-26", "sell", "12"),
+  ]);
+  a.initialCash = "5000";
+  a.cashEntries = [
+    {
+      id: "in",
+      kind: "deposit",
+      amount: "1000",
+      date: "2026-08-25",
+      time: "2026-08-25T00:00:00Z",
+      note: "",
+    },
+    {
+      id: "out",
+      kind: "withdraw",
+      amount: "500",
+      date: "2026-08-26",
+      time: "2026-08-26T01:00:00Z",
+      note: "",
+    },
+    {
+      id: "interest",
+      kind: "interest",
+      amount: "2",
+      date: "2026-08-26",
+      time: "2026-08-26T02:00:00Z",
+      note: "",
+    },
+  ];
+  const result = analyzeAccount(
+    a,
+    { [id]: bars({ "2026-08-24": "11" }) },
+    {},
+    "2026-08-26",
+  );
+  expect(result.days.map((d) => d.cumulativeProfit)).toEqual([
+    "100.00",
+    null,
+    "201.00",
+  ]);
+  expect(result.days[0].profit).toBeNull();
+  expect(result.days[2].assets).toBe("6701.00");
+  expect(
+    new Decimal(result.days[2].cumulativeProfit!)
+      .minus(result.days[0].cumulativeProfit!)
+      .toFixed(2),
+  ).toBe("101.00");
 });

@@ -35,12 +35,9 @@ pub fn snapshot(s: &Snapshot) -> Value {
   if e.kind=="news" {if let Some(news)=content.as_object_mut(){news.remove("summary");if e.availability!="fullText" {news.remove("fullText");news.insert("readingBoundary".into(),json!("未取得完整正文，仅作为来源线索，不用于事件影响判断。"));}}}
   json!({"id":e.id,"kind":e.kind,"source":e.source,"url":e.url,"publishedAt":e.published_at,"timePrecision":e.time_precision,"eventAt":e.event_at,"collectedAt":e.collected_at,"availability":e.availability,"referenceAllowed":e.availability!="titleOnly","content":content})
  }).collect::<Vec<_>>();
-    let account_summary = s
-        .evidence
-        .iter()
-        .find(|e| e.kind == "accountSummary")
-        .and_then(|e| serde_json::from_str::<Value>(&e.content).ok())
-        .unwrap_or_else(|| super::account_brief::build(s));
+    // Rebuild derived explanations from the frozen raw inputs so old wording cannot
+    // override current cash semantics. Stored snapshots and reports stay unchanged.
+    let account_summary = super::account_brief::build(s);
     json!({"readingGuide":super::account_brief::READING_GUIDE,"accountSummary":account_summary,"security":s.security,"cutoffAt":s.cutoff_at,"frozenAt":s.frozen_at,"referencePrice":s.reference_price,"windows":s.windows,"sourceStates":s.source_states,"allowedEvidenceIds":s.evidence.iter().filter(|e|e.availability!="titleOnly" && e.kind!="accountSummary").map(|e|e.id.clone()).collect::<Vec<_>>(),"requiredOperationEvidenceIds":s.evidence.iter().filter(|e|["position","cash"].contains(&e.kind.as_str())).map(|e|e.id.clone()).collect::<Vec<_>>(),"evidence":evidence})
 }
 // The synthesis reads original model reports, not another full set of price bars.

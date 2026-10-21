@@ -42,6 +42,7 @@ vi.mock("./market", () => ({
   hydrateMarket: vi.fn(),
   clearMarket: vi.fn(),
   getChart: vi.fn().mockResolvedValue(undefined),
+  recoverChartRequests: vi.fn(),
   chartKey: (id: string, mode: string) => `${id}:${mode}`,
   makeMarketPoller: () => ({
     setTargets() {},

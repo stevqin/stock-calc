@@ -86,6 +86,7 @@ import {
   makeFundFlowPoller,
   fundFlowStatus,
   getChart,
+  recoverChartRequests,
   chartKey,
   clearMarket,
 } from "./market";
@@ -1153,6 +1154,7 @@ onMounted(async () => {
     targets();
     if (menuBarEnabled) {
       stopMenuBarTick = await listen("status-bar-tick", () => {
+        recoverChartRequests();
         clock.value = Date.now();
         void poller.refreshIfDue();
         void refreshCharts();

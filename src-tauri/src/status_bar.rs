@@ -795,7 +795,19 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
         if refresh_handle.tray_by_id("portfolio").is_none() {
             break;
         }
-        let _ = refresh_handle.emit("status-bar-tick", ());
+        let main_visible = refresh_handle
+            .get_webview_window("main")
+            .is_some_and(|window| {
+                crate::market_request_allowed(
+                    false,
+                    window.is_visible().unwrap_or(false),
+                    window.is_minimized().unwrap_or(true),
+                )
+            });
+        let _ = refresh_handle.emit(
+            "status-bar-tick",
+            serde_json::json!({"mainVisible": main_visible}),
+        );
     });
     Ok(())
 }

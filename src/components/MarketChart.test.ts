@@ -6,6 +6,8 @@ import { manualAccount } from "../sim/record";
 import type { ChartData } from "../sim/chart";
 const native = vi.hoisted(() => ({
   activated: undefined as (() => void) | undefined,
+  tick: undefined as
+    ((event: { payload: { mainVisible: boolean } }) => void) | undefined,
   unlisten: vi.fn(),
 }));
 const chart = vi.hoisted(() => ({
@@ -20,6 +22,7 @@ vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (event, callback) => {
     if (event === "main-window-activated") native.activated = callback;
+    if (event === "status-bar-tick") native.tick = callback;
     return native.unlisten;
   }),
 }));
@@ -27,6 +30,9 @@ vi.mock("../market", () => ({
   getChart: vi.fn(),
   liveDaily: (d: unknown) => d,
   marketQuotes: {},
+  marketErrors: {},
+  recoverChartRequests: vi.fn(),
+  chartKey: (id: string, mode: string) => `${id}:${mode}`,
 }));
 let wrapper: ReturnType<typeof mount>;
 const security = manualAccount().securities[0];
@@ -362,4 +368,56 @@ it("筹码与K线共用价格坐标，MACD独立下方并联动时间轴", async
   expect(chart.setOption.mock.calls.at(-1)![0].grid[0].right).toBe(150);
   expect(chart.setOption.mock.calls.at(-1)![0].dataZoom[0].end).toBe(40);
   delete marketQuotes[security.id];
+});
+
+it.each(["intraday", "five-day"] as const)(
+  "keeps %s refreshing through native ticks while WebKit reports hidden",
+  async (mode) => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+      wrapper = mount(MarketChart, { props: { security, mode, trades: [] } });
+      await flushPromises();
+      native.activated?.();
+      await flushPromises();
+      expect(getChart).toHaveBeenCalledTimes(1);
+      for (let i = 0; i < 240; i++) {
+        vi.setSystemTime(Date.now() + 30000);
+        native.tick?.({ payload: { mainVisible: true } });
+        await flushPromises();
+      }
+      expect(getChart).toHaveBeenCalledTimes(241);
+      vi.setSystemTime(Date.now() + 30000);
+      native.tick?.({ payload: { mainVisible: false } });
+      await flushPromises();
+      expect(getChart).toHaveBeenCalledTimes(241);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+it("native heartbeat does not turn a failed in-flight chart request into immediate repeated retries", async () => {
+  vi.useFakeTimers();
+  try {
+    let reject!: (e: Error) => void;
+    vi.mocked(getChart).mockImplementationOnce(
+      () => new Promise((_resolve, fail) => (reject = fail)),
+    );
+    wrapper = mount(MarketChart, {
+      props: { security, mode: "intraday", trades: [] },
+    });
+    await flushPromises();
+    vi.setSystemTime(Date.now() + 3000);
+    native.tick?.({ payload: { mainVisible: true } });
+    await flushPromises();
+    reject(new Error("网络暂不可用"));
+    await flushPromises();
+    expect(getChart).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(Date.now() + 60000);
+    native.tick?.({ payload: { mainVisible: true } });
+    await flushPromises();
+    expect(getChart).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

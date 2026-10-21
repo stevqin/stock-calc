@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount, watch } from "vue";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Security } from "../sim/model";
 import { marketColor } from "../marketTheme";
 import {
   getChart,
+  recoverChartRequests,
   chartKey,
   liveDaily,
   marketCharts,
@@ -15,6 +18,10 @@ const root = ref<HTMLElement>();
 const visible = ref(false);
 let observer: IntersectionObserver | undefined,
   timer: ReturnType<typeof setInterval>;
+let disposed = false,
+  busy = false,
+  nextRefreshAt = 0;
+const stops: UnlistenFn[] = [];
 const emit = defineEmits<{ visible: [id: string, visible: boolean] }>();
 const key = computed(() => chartKey(props.security.id, props.mode));
 const data = computed(() => {
@@ -67,13 +74,56 @@ const geometry = computed(() => {
     ),
   };
 });
-async function refresh() {
-  if (!visible.value || document.hidden) return;
-  await getChart(props.security, props.mode, () => visible.value).catch(
-    () => {},
+function visibleOnScreen() {
+  const box = root.value?.getBoundingClientRect();
+  return Boolean(
+    box &&
+    box.width > 0 &&
+    box.height > 0 &&
+    box.bottom > 0 &&
+    box.top < window.innerHeight &&
+    box.right > 0 &&
+    box.left < window.innerWidth,
   );
 }
-watch(() => [props.security.id, props.mode], refresh);
+async function refresh(foregroundWake = false) {
+  if (disposed || busy) return;
+  if (foregroundWake) {
+    const nowVisible = visibleOnScreen();
+    if (nowVisible !== visible.value) {
+      visible.value = nowVisible;
+      emit("visible", props.security.id, nowVisible);
+    }
+  }
+  if (
+    !visible.value ||
+    (!foregroundWake && document.hidden) ||
+    (foregroundWake && Date.now() < nextRefreshAt)
+  )
+    return;
+  busy = true;
+  try {
+    await getChart(
+      props.security,
+      props.mode,
+      () => !disposed && visible.value,
+      false,
+      foregroundWake,
+    );
+  } catch {
+    /* Keep the last successful curve while retrying. */
+  } finally {
+    busy = false;
+    nextRefreshAt = Date.now() + (marketErrors[key.value] ? 60000 : 30000);
+  }
+}
+watch(
+  () => [props.security.id, props.mode],
+  () => {
+    nextRefreshAt = 0;
+    void refresh();
+  },
+);
 onMounted(() => {
   observer = new IntersectionObserver((entries) => {
     visible.value = entries[0].isIntersecting;
@@ -81,9 +131,29 @@ onMounted(() => {
     if (visible.value) void refresh();
   });
   observer.observe(root.value!);
-  timer = setInterval(refresh, 30000);
+  timer = setInterval(() => void refresh(), 30000);
+  if (isTauri()) {
+    const keep = (stop: UnlistenFn) => {
+      if (disposed) stop();
+      else stops.push(stop);
+    };
+    void listen<{ mainVisible: boolean }>("status-bar-tick", ({ payload }) => {
+      recoverChartRequests();
+      if (payload?.mainVisible) void refresh(true);
+    })
+      .then(keep)
+      .catch(() => {});
+    void listen("main-window-activated", () => {
+      nextRefreshAt = 0;
+      void refresh(true);
+    })
+      .then(keep)
+      .catch(() => {});
+  }
 });
 onBeforeUnmount(() => {
+  disposed = true;
+  for (const stop of stops) stop();
   clearInterval(timer);
   observer?.disconnect();
   emit("visible", props.security.id, false);

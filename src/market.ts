@@ -272,6 +272,12 @@ class RequestQueue {
 const queue = new RequestQueue();
 const inFlight = new Map<string, Promise<ChartData>>();
 const failedUntil = new Map<string, number>();
+const chartWaits = new Set<{ deadline: number; expire: () => void }>();
+/** Native events can expire a lost IPC callback even if WebKit suspended timers. */
+export function recoverChartRequests() {
+  for (const wait of chartWaits) if (Date.now() >= wait.deadline) wait.expire();
+}
+
 export async function getChart(
   s: MarketSecurity,
   mode: ChartMode,
@@ -279,6 +285,7 @@ export async function getChart(
   background = false,
   foregroundWake = false,
 ): Promise<ChartData> {
+  recoverChartRequests();
   const key = chartKey(s.id, mode),
     cached = marketCharts[key];
   const daily = mode === "daily" || mode === "daily-raw";
@@ -301,11 +308,33 @@ export async function getChart(
       if ((!background && !foregroundWake && document.hidden) || !active())
         throw new Error("图表不可见，等待重新显示");
       if (!isTauri()) throw new Error("桌面版提供实时走势");
-      const data = await invoke<ChartData>("fetch_chart", {
-        market: s.market,
-        code: s.code,
-        mode,
-        background,
+      // Bound the IPC wait as well as the native HTTP request: a lost callback
+      // must not retain an in-flight key or one of the four shared queue slots.
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let wait: { deadline: number; expire: () => void };
+      const data = await Promise.race([
+        invoke<ChartData>("fetch_chart", {
+          market: s.market,
+          code: s.code,
+          mode,
+          background,
+        }),
+        new Promise<never>((_resolve, reject) => {
+          wait = {
+            deadline: Date.now() + 15000,
+            expire: () =>
+              reject(
+                new Error(
+                  "走势图请求超过15秒未返回，已保留上次走势，将自动重试",
+                ),
+              ),
+          };
+          chartWaits.add(wait);
+          timeout = setTimeout(wait.expire, 15000);
+        }),
+      ]).finally(() => {
+        clearTimeout(timeout);
+        chartWaits.delete(wait);
       });
       if (!validChart(data, key)) throw new Error("图表格式无效或证券不匹配");
       if (mode === "daily-raw" && data.adjustment !== "不复权")

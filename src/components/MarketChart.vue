@@ -31,7 +31,14 @@ import {
 } from "../sim/chart";
 import type { Security, Entry } from "../sim/model";
 import { tradeMarkers, type TradeMarker } from "../sim/tradeMarkers";
-import { getChart, liveDaily, marketQuotes } from "../market";
+import {
+  getChart,
+  recoverChartRequests,
+  liveDaily,
+  marketQuotes,
+  marketErrors,
+  chartKey,
+} from "../market";
 import { MARKET_COLORS, marketColor } from "../marketTheme";
 echarts.use([
   CandlestickChart,
@@ -71,6 +78,8 @@ let chart: echarts.ECharts | undefined,
   disposed = false,
   foregroundRefreshPending = false;
 let stopMainActivated: UnlistenFn | undefined;
+let stopNativeTick: UnlistenFn | undefined;
+let nextRefreshAt = 0;
 const n = (value: number, digits = 2) =>
   Number.isFinite(value) ? value.toFixed(digits) : "—";
 const signed = (value: number, digits = 2, suffix = "") =>
@@ -741,7 +750,12 @@ function draw(d: ChartData) {
   );
 }
 async function refresh(foregroundWake = false) {
-  if (disposed || (!foregroundWake && document.hidden)) return;
+  if (disposed) return;
+  if (!foregroundWake && document.hidden) {
+    clearTimeout(timer);
+    timer = setTimeout(() => void refresh(), 30000);
+    return;
+  }
   if (busy) {
     if (foregroundWake) foregroundRefreshPending = true;
     return;
@@ -774,13 +788,21 @@ async function refresh(foregroundWake = false) {
     if (foregroundRefreshPending && !disposed) {
       foregroundRefreshPending = false;
       void refresh(true);
-    } else if (!disposed && (foregroundWake || !document.hidden)) {
+    } else if (!disposed) {
       if (token !== generation) void refresh();
-      else timer = setTimeout(refresh, error.value ? 60000 : 30000);
+      else {
+        const delay =
+          error.value || marketErrors[chartKey(props.security.id, props.mode)]
+            ? 60000
+            : 30000;
+        nextRefreshAt = Date.now() + delay;
+        timer = setTimeout(() => void refresh(), delay);
+      }
     }
   }
 }
 function reset() {
+  nextRefreshAt = 0;
   generation++;
   zoomTouched = false;
   zoomWindow = { start: 0, end: 100 };
@@ -837,10 +859,22 @@ onMounted(() => {
   void listen("main-window-activated", () => {
     clearTimeout(timer);
     void refresh(true);
-  }).then((unlisten) => {
-    if (disposed) unlisten();
-    else stopMainActivated = unlisten;
-  });
+  })
+    .then((unlisten) => {
+      if (disposed) unlisten();
+      else stopMainActivated = unlisten;
+    })
+    .catch(() => {});
+  void listen<{ mainVisible: boolean }>("status-bar-tick", ({ payload }) => {
+    recoverChartRequests();
+    if (payload?.mainVisible && !busy && Date.now() >= nextRefreshAt)
+      void refresh(true);
+  })
+    .then((unlisten) => {
+      if (disposed) unlisten();
+      else stopNativeTick = unlisten;
+    })
+    .catch(() => {});
   void refresh();
 });
 onBeforeUnmount(() => {
@@ -850,6 +884,7 @@ onBeforeUnmount(() => {
   observer?.disconnect();
   chart?.dispose();
   stopMainActivated?.();
+  stopNativeTick?.();
   document.removeEventListener("visibilitychange", visibility);
 });
 </script>

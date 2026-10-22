@@ -5,7 +5,7 @@
   <p>把价差、手续费、保本价格和持仓成本放在同一套计算里，先算清楚，再决定是否交易。</p>
 </div>
 
-> 当前版本：`0.9.9` · 桌面端基于 Tauri 2 · 已在 Apple Silicon Mac 上验证
+> 当前版本：`0.9.23` · 桌面端基于 Tauri 2 · 已在 Apple Silicon Mac 上验证
 
 ## 为什么开发 T刻
 
@@ -193,6 +193,30 @@ T刻使用十进制运算处理金额，各项费用分别计算并四舍五入�
 - 暂未提供自动更新。
 
 可在 [GitHub Releases](https://github.com/stevqin/stock-calc/releases) 下载 macOS Apple Silicon DMG 或 Windows x64 安装包。未签名或未公证的安装包可能触发系统安全提示，请确认下载来源后再决定是否运行。
+
+### macOS 首次打开：无法验证开发者或未公证提示
+
+目前 Mac 版使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名和 Apple 公证。首次打开时，系统可能提示“无法验证开发者”或“Apple 无法检查其是否包含恶意软件”。
+
+1. 从本项目的 [GitHub Releases](https://github.com/stevqin/stock-calc/releases) 下载 DMG，打开后将 **T刻.app** 拖入“应用程序”（`/Applications`）。
+2. 尝试打开一次 T刻；若被拦截，进入 **系统设置 → 隐私与安全性**，找到 T刻的拦截提示，点击 **仍要打开**，按系统提示确认。参见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
+3. 如果仍因下载隔离标记无法打开，确认安装包来自本项目后，在“终端”中执行：
+
+   ```sh
+   xattr -dr com.apple.quarantine "/Applications/T刻.app"
+   open "/Applications/T刻.app"
+   ```
+
+   第一条命令仅移除 T刻及其内部文件的下载隔离标记，第二条启动应用。若安装在其他位置，请将两处路径替换为实际的 `.app` 路径。
+
+   若第一条命令提示 `Permission denied` 或 `Operation not permitted`，可使用管理员权限重试，并按提示输入本机登录密码（输入时终端不显示字符）：
+
+   ```sh
+   sudo xattr -dr com.apple.quarantine "/Applications/T刻.app"
+   open "/Applications/T刻.app"
+   ```
+
+以上处理适用于已确认来源的未公证版本。若系统明确提示包含恶意软件，或从 Release 重新下载后文件校验仍不一致，请停止运行并反馈问题。
 
 ### 从源码启动
 

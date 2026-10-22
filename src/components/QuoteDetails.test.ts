@@ -98,3 +98,43 @@ it("分时标签栏横跨整行，盘口与图表从标签栏下方同一高度�
   expect(content.element.children[1]).toBe(wrapper.get(".quote-book").element);
   wrapper.unmount();
 });
+
+it("量比、委比、内外盘与52周价格显示颜色并随报价变化，悬停说明基准", async () => {
+  const fields = Array(89).fill("");
+  Object.assign(fields, {
+    4: "10",
+    49: "1.5",
+    74: "-20",
+    7: "100",
+    8: "200",
+    67: "12",
+    68: "8",
+  });
+  const wrapper = mount(QuoteDetails, {
+    props: { quote: { kind: "stock", rawFields: fields } as Quote },
+  });
+  for (const index of [49, 7, 67])
+    expect(wrapper.get(`[data-field="${index}"] dd`).classes()).toContain(
+      "quote-up",
+    );
+  for (const index of [74, 8, 68])
+    expect(wrapper.get(`[data-field="${index}"] dd`).classes()).toContain(
+      "quote-down",
+    );
+  expect(wrapper.get('[data-field="49"] dd').attributes("title")).toContain(
+    "成交活跃度",
+  );
+  expect(wrapper.get('[data-field="67"] dd').attributes("title")).toContain(
+    "昨收",
+  );
+  await wrapper.setProps({
+    quote: {
+      ...wrapper.props("quote")!,
+      rawFields: Object.assign([...fields], { 49: "0.7", 74: "20", 67: "9" }),
+    } as Quote,
+  });
+  expect(wrapper.get('[data-field="49"] dd').classes()).toContain("quote-down");
+  expect(wrapper.get('[data-field="74"] dd').classes()).toContain("quote-up");
+  expect(wrapper.get('[data-field="67"] dd').classes()).toContain("quote-down");
+  wrapper.unmount();
+});

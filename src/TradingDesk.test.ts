@@ -186,7 +186,7 @@ describe("重构工作台集成", () => {
     expect(panel().findAll(".trade-record-row")).toHaveLength(1);
     expect(panel().findAll(".trade-stage-row")).toHaveLength(1);
     expect(panel().find(".ledger-history-table tbody").text()).toContain(
-      "建仓",
+      "期初",
     );
     await button("做T测算").trigger("click");
     await flushPromises();

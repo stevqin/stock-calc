@@ -16,6 +16,7 @@ import {
 const props = defineProps<{ security: Security; mode: "daily" | "intraday" }>();
 const root = ref<HTMLElement>();
 const visible = ref(false);
+const checkedAt = ref(Date.now());
 let observer: IntersectionObserver | undefined,
   timer: ReturnType<typeof setInterval>;
 let disposed = false,
@@ -27,6 +28,23 @@ const key = computed(() => chartKey(props.security.id, props.mode));
 const data = computed(() => {
   const d = marketCharts[key.value];
   return d ? liveDaily(d, marketQuotes[props.security.id]) : null;
+});
+const description = computed(() => {
+  const chart = data.value;
+  if (!chart) return marketErrors[key.value] || "等待可见行行情";
+  const session = chart.sessions.at(-1);
+  const point = session?.points.at(-1);
+  const lines = [
+    chart.source || chart.adjustment,
+    `获取 ${new Date(chart.fetchedAt).toLocaleString("zh-CN")}`,
+  ];
+  if (session && point)
+    lines.push(
+      `最后点位 ${session.date} ${point.time.slice(0, 2)}:${point.time.slice(2)}`,
+    );
+  if (marketErrors[key.value])
+    lines.push(`更新未成功：${marketErrors[key.value]}`);
+  return lines.join("\n");
 });
 const geometry = computed(() => {
   const d = data.value;
@@ -87,6 +105,7 @@ function visibleOnScreen() {
   );
 }
 async function refresh(foregroundWake = false) {
+  if (Date.now() - checkedAt.value >= 30000) checkedAt.value = Date.now();
   if (disposed || busy) return;
   if (foregroundWake) {
     const nowVisible = visibleOnScreen();
@@ -160,15 +179,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div
-    ref="root"
-    class="mini-chart"
-    :title="
-      data
-        ? `${data.adjustment} · 获取 ${new Date(data.fetchedAt).toLocaleString('zh-CN')}`
-        : marketErrors[key] || '等待可见行行情'
-    "
-  >
+  <div ref="root" class="mini-chart" :title="description">
     <svg v-if="geometry" viewBox="0 0 180 56" preserveAspectRatio="none">
       <line
         x1="0"
@@ -212,7 +223,7 @@ onBeforeUnmount(() => {
     <span
       v-if="
         data &&
-        Date.now() - Date.parse(data.fetchedAt) > 120000 &&
+        checkedAt - Date.parse(data.fetchedAt) > 120000 &&
         mode === 'intraday'
       "
       class="cache-tag"

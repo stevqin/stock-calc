@@ -1580,8 +1580,62 @@ body,
 .trade-stage-row td {
   display: table-cell;
 }
-.trade-stage-row td > span:last-child {
-  float: right;
+.compact-history .trade-stage-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  width: 100%;
+  min-height: 36px;
+  margin: 0;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+.trade-stage-toggle:focus-visible {
+  outline: 2px solid #3a78c2;
+  outline-offset: 2px;
+}
+.trade-stage-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.trade-stage-chevron {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 10px;
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+  transform: rotate(90deg);
+  transition: transform 160ms ease;
+}
+.trade-stage-chevron.collapsed {
+  transform: rotate(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .trade-stage-chevron {
+    transition: none;
+  }
+}
+.trade-history-table .trade-time {
+  padding-left: 4px;
+  padding-right: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.trade-time > span,
+.trade-time > small {
+  display: block;
 }
 .trade-stage-row b {
   font-family: "SF Mono", monospace;
@@ -3310,4 +3364,22 @@ body,
   margin: 4px 12px;
   font-size: 11px;
   color: #bd4552;
+}
+
+/* Post-fill cost stays legible alongside the execution price in both history views. */
+.trade-history-table .trade-position-cost {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.compact-history .trade-fees > span,
+.compact-history .trade-fees > small {
+  display: block;
+  line-height: 1.4;
+}
+.compact-history .trade-fees > small {
+  color: #66778b;
+}
+
+.compact-history .trade-fees > .trade-total-fees {
+  font-weight: 600;
 }

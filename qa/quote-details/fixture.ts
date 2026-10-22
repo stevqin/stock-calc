@@ -1,5 +1,8 @@
 import type { ChartData, ChartMode } from "../../src/sim/chart";
 export const isTauri = () => true;
+export const marketErrors = {};
+export const chartKey = (id: string, mode: ChartMode) => `${id}:${mode}`;
+export function recoverChartRequests() {}
 export const marketQuotes: Record<string, import("../../src/quotes").Quote> =
   {};
 export const liveDaily = (d: ChartData) => d;

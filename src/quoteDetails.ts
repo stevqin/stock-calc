@@ -132,3 +132,51 @@ export function formatQuoteField(
     return "—";
   }
 }
+
+const signedQuoteFields = new Set([31, 32, 62, 63, 70, 74, 77]);
+const comparisonPriceFields = new Set([3, 5, 33, 34, 47, 48, 51, 67, 68]);
+/** Colors describe each metric's comparison or trade direction, not a buy/sell signal. */
+export function quoteFieldTone(
+  quote: Quote | undefined,
+  field: QuoteField,
+): string {
+  const raw = fieldValue(quote, field);
+  if (!raw.trim()) return "";
+  try {
+    const value = new Decimal(raw);
+    if (!value.isFinite()) return "";
+    let change = value;
+    if (field.index === 7 || field.index === 8) {
+      return value.gt(0) ? (field.index === 7 ? "quote-up" : "quote-down") : "";
+    }
+    if (field.index === 49) {
+      if (value.lte(0)) return "";
+      change = value.minus(1);
+    } else if (comparisonPriceFields.has(field.index)) {
+      const previous = fieldValue(quote, {
+        index: 4,
+        label: "",
+        fallback: "previousClose",
+      });
+      if (!previous.trim() || value.lte(0)) return "";
+      const baseline = new Decimal(previous);
+      if (!baseline.isFinite() || baseline.lte(0)) return "";
+      change = value.minus(baseline);
+    } else if (!signedQuoteFields.has(field.index)) return "";
+    return change.gt(0) ? "quote-up" : change.lt(0) ? "quote-down" : "";
+  } catch {
+    return "";
+  }
+}
+export function quoteFieldColorHint(field: QuoteField): string {
+  if (field.index === 49)
+    return "量比以1为基准：大于1红色，小于1绿色，等于1中性；仅反映成交活跃度，不代表股价涨跌";
+  if (field.index === 74)
+    return "委比正值红色、负值绿色、零为中性，反映买卖挂单量的差异";
+  if (field.index === 7) return "外盘为主动性买入成交量，红色用于区分成交方向";
+  if (field.index === 8) return "内盘为主动性卖出成交量，绿色用于区分成交方向";
+  if (comparisonPriceFields.has(field.index))
+    return "与昨收比较：高于昨收红色，低于昨收绿色，相等时中性";
+  if (signedQuoteFields.has(field.index)) return "正值红色、负值绿色、零为中性";
+  return "";
+}

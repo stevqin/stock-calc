@@ -53,7 +53,7 @@ pub fn parse_chart(v: Value, symbol: &str, mode: &str) -> Result<Value, String> 
             json!({"symbol":symbol,"mode":mode,"bars":bars,"sessions":[],"historyWindow":400,"adjustment":if d.get("qfqday").is_some(){"前复权"}else{"不复权"},"fetchedAt":updated}),
         );
     }
-    let sessions: Vec<Value> = if mode == "intraday" {
+    let sessions: Vec<Value> = if mode == "intraday" && d["data"].is_object() {
         vec![json!({"date":d["data"]["date"],"data":d["data"]["data"],"prec":d["qt"][symbol][4]})]
     } else {
         d["data"].as_array().ok_or("暂无五日分时")?.clone()
@@ -93,8 +93,15 @@ pub fn parse_chart(v: Value, symbol: &str, mode: &str) -> Result<Value, String> 
         result.push(json!({"date":date,"previousClose":numeric(&session["prec"]),"points":points.into_values().collect::<Vec<_>>()}));
     }
     result.sort_by(|a, b| a["date"].as_str().cmp(&b["date"].as_str()));
+    if mode == "intraday" {
+        let latest = result.pop().ok_or("暂无最近交易日分时数据")?;
+        if latest["points"].as_array().is_none_or(|points| points.is_empty()) {
+            return Err("最近交易日分时点位为空".into());
+        }
+        result = vec![latest];
+    }
     Ok(
-        json!({"symbol":symbol,"mode":mode,"bars":[],"sessions":result,"adjustment":"不复权","fetchedAt":updated}),
+        json!({"symbol":symbol,"mode":mode,"bars":[],"sessions":result,"adjustment":"不复权","fetchedAt":updated,"source":if d["data"].is_array(){"腾讯五日分时"}else{"腾讯单日分时"}}),
     )
 }
 #[tauri::command]
@@ -125,33 +132,67 @@ pub(crate) async fn request_chart(
         return Err("证券代码无效".into());
     }
     let symbol = format!("{market}{code}");
+    if mode == "intraday" {
+        return request_intraday(
+            client,
+            &symbol,
+            &format!("https://web.ifzq.gtimg.cn/appstock/app/day/query?code={symbol}"),
+            &format!("https://web.ifzq.gtimg.cn/appstock/app/minute/query?code={symbol}"),
+        ).await;
+    }
     let url = match mode {
-        "daily" => format!(
-            "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,400,qfq"
-        ),
-        "daily-raw" => {
-            format!("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,400,")
-        }
-        "intraday" => format!("https://web.ifzq.gtimg.cn/appstock/app/minute/query?code={symbol}"),
+        "daily" => format!("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,400,qfq"),
+        "daily-raw" => format!("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,400,"),
         "five-day" => format!("https://web.ifzq.gtimg.cn/appstock/app/day/query?code={symbol}"),
         _ => return Err("不支持的图表周期".into()),
     };
-    let mut response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|_| "图表请求超时或网络不可用")?
-        .error_for_status()
-        .map_err(|_| "图表服务不可用")?;
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| "读取图表失败")? {
-        if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
-            return Err("图表响应过大".into());
-        }
-        bytes.extend_from_slice(&chunk)
+    request_chart_url(client, &url, &symbol, mode, "腾讯走势图").await
+}
+async fn request_intraday(
+    client: &reqwest::Client,
+    symbol: &str,
+    primary: &str,
+    secondary: &str,
+) -> Result<Value, String> {
+    // The five-day feed also contains today's complete minute series. One
+    // healthy request suffices; only fall back when transport or parsing fails.
+    match request_chart_url(client, primary, symbol, "intraday", "腾讯五日分时").await {
+        Ok(data) => Ok(data),
+        Err(first) => request_chart_url(client, secondary, symbol, "intraday", "腾讯单日分时")
+            .await
+            .map_err(|second| format!("分时暂未更新：{first}；{second}。保留上次走势，稍后自动重试")),
     }
-    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "图表响应不是JSON")?;
-    parse_chart(value, &symbol, &mode)
+}
+async fn request_chart_url(
+    client: &reqwest::Client,
+    url: &str,
+    symbol: &str,
+    mode: &str,
+    service: &str,
+) -> Result<Value, String> {
+    // Two intraday attempts stay inside the frontend's 15-second IPC deadline.
+    let mut response = client.get(url)
+        .timeout(std::time::Duration::from_secs(if mode == "intraday" { 6 } else { 8 }))
+        .send().await.map_err(|error| {
+            let reason = if error.is_connect() { "连接失败或连接超时" }
+                else if error.is_timeout() { "等待数据超时" }
+                else { "网络请求失败" };
+            format!("{service}{reason}")
+        })?;
+    if !response.status().is_success() {
+        return Err(format!("{service}服务返回 HTTP {}", response.status().as_u16()));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        format!("{service}{}", if error.is_timeout() { "等待完整数据超时" } else { "读取数据失败" })
+    })? {
+        if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
+            return Err(format!("{service}响应过大"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| format!("{service}未返回有效行情数据"))?;
+    parse_chart(value, symbol, mode).map_err(|reason| format!("{service}：{reason}"))
 }
 pub(crate) fn analysis_history_url(market: &str, code: &str, year: i32) -> Result<String, String> {
     use chrono::Datelike;
@@ -509,4 +550,86 @@ mod tests {
         assert!(parse_chart(json!({"code":-1}), "sh510300", "daily").is_err());
         assert!(parse_chart(json!({"code":0,"data":{}}), "sh510300", "intraday").is_err());
     }
+    #[test]
+    fn intraday_accepts_five_day_payload_and_keeps_only_latest_session() {
+        let data = json!({"code":0,"data":{"sz000725":{"data":[
+            {"date":"20261022","prec":"5.05","data":["0930 4.9 10 4900","1341 4.83 7429815 3651486307"]},
+            {"date":"20261021","prec":"5.04","data":["1500 5.05 5755753 2922578037"]}
+        ]}}});
+        let chart = parse_chart(data.clone(), "sz000725", "intraday").unwrap();
+        assert_eq!(chart["mode"], "intraday");
+        assert_eq!(chart["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(chart["sessions"][0]["date"], "20261022");
+        assert_eq!(chart["sessions"][0]["previousClose"], "5.05");
+        assert_eq!(chart["sessions"][0]["points"][1]["time"], "1341");
+        assert_eq!(chart["sessions"][0]["points"][1]["price"], "4.83");
+        assert_eq!(chart["source"], "腾讯五日分时");
+        assert_eq!(parse_chart(data, "sz000725", "five-day").unwrap()["sessions"].as_array().unwrap().len(), 2);
+    }
+    #[test]
+    fn intraday_rejects_empty_latest_session_instead_of_overwriting_a_cached_curve() {
+        assert!(parse_chart(json!({"code":0,"data":{"sz000725":{"data":[]}}}), "sz000725", "intraday").is_err());
+        assert!(parse_chart(json!({"code":0,"data":{"sz000725":{"data":[{"date":"20261022","prec":"5","data":[]}]}}}), "sz000725", "intraday").is_err());
+    }
+
+    fn chart_http_fixture(status: u16, body: String) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/chart", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+            let mut request = [0; 8192]; let _ = stream.read(&mut request);
+            write!(stream, "HTTP/1.1 {status} fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        (url, handle)
+    }
+    #[test]
+    fn healthy_five_day_intraday_needs_no_second_request() {
+        tauri::async_runtime::block_on(async {
+            let body = json!({"code":0,"data":{"sz000725":{"data":[{"date":"20261022","prec":"5","data":["1345 4.85 100 48500"]}]}}}).to_string();
+            let (url, server) = chart_http_fixture(200, body);
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let result = request_intraday(&client, "sz000725", &url, "http://127.0.0.1:9/not-needed").await.unwrap();
+            assert_eq!(result["source"], "腾讯五日分时");
+            assert_eq!(result["sessions"][0]["points"][0]["time"], "1345");
+            server.join().unwrap();
+        });
+    }
+    #[test]
+    fn intraday_falls_back_on_http_501_and_reports_both_failures() {
+        tauri::async_runtime::block_on(async {
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let (first, server1) = chart_http_fixture(501, "blocked".into());
+            let body = json!({"code":0,"data":{"sz000725":{"data":{"date":"20261022","data":["1345 4.85 100 48500"]},"qt":{"sz000725":["","","","","5.05"]}}}}).to_string();
+            let (second, server2) = chart_http_fixture(200, body);
+            let result = request_intraday(&client, "sz000725", &first, &second).await.unwrap();
+            assert_eq!(result["source"], "腾讯单日分时");
+            assert_eq!(result["sessions"][0]["previousClose"], "5.05");
+            server1.join().unwrap(); server2.join().unwrap();
+            let (first, server1) = chart_http_fixture(501, "blocked".into());
+            let (second, server2) = chart_http_fixture(503, "unavailable".into());
+            let error = request_intraday(&client, "sz000725", &first, &second).await.unwrap_err();
+            assert!(error.contains("腾讯五日分时服务返回 HTTP 501"));
+            assert!(error.contains("腾讯单日分时服务返回 HTTP 503"));
+            assert!(error.contains("保留上次走势"));
+            server1.join().unwrap(); server2.join().unwrap();
+        });
+    }
+    #[test]
+    #[ignore = "manual public-network intraday source smoke test"]
+    fn live_intraday_source_smoke() {
+        tauri::async_runtime::block_on(async {
+            let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(8)).connect_timeout(std::time::Duration::from_secs(4)).build().unwrap();
+            for (market, code) in [("sz", "000725"), ("sh", "603280"), ("sh", "510300")] {
+                let data = request_chart(&client, market, code, "intraday").await.unwrap();
+                assert_eq!(data["sessions"].as_array().unwrap().len(), 1);
+                let session = &data["sessions"][0];
+                let points = session["points"].as_array().unwrap();
+                assert!(!points.is_empty());
+                println!("{market}{code} source={} date={} last={} count={}", data["source"], session["date"], points.last().unwrap()["time"], points.len());
+            }
+        });
+    }
+
 }

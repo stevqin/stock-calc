@@ -6,13 +6,14 @@ import type { Security } from "../sim/model";
 import type { ChartData, ChartMode } from "../sim/chart";
 import { yearReturn } from "../sim/indicators";
 import OrderBook from "./OrderBook.vue";
-import Decimal from "decimal.js";
 import type { Quote } from "../quotes";
 import {
   fieldLabels,
   fieldValue,
   formatQuoteField,
   quoteGroups,
+  quoteFieldTone,
+  quoteFieldColorHint,
   type QuoteField,
 } from "../quoteDetails";
 const props = defineProps<{
@@ -103,26 +104,16 @@ const extras = computed(() =>
     ),
 );
 const raw = computed(() => props.quote?.rawFields ?? []);
-const signedFields = new Set([31, 32, 62, 63, 70, 74, 77]);
-const priceFields = new Set([3, 5, 33, 34, 47, 48, 51]);
 function tone(field: QuoteField): string {
-  const value = fieldValue(props.quote, field);
-  if (!value.trim()) return "";
-  try {
-    let change = new Decimal(value);
-    if (priceFields.has(field.index)) {
-      const previous = fieldValue(props.quote, {
-        index: 4,
-        label: "",
-        fallback: "previousClose",
-      });
-      if (!previous || change.lte(0)) return "";
-      change = change.minus(previous);
-    } else if (!signedFields.has(field.index)) return "";
-    return change.gt(0) ? "quote-up" : change.lt(0) ? "quote-down" : "";
-  } catch {
-    return "";
-  }
+  return quoteFieldTone(props.quote, field);
+}
+function fieldTitle(field: QuoteField): string {
+  return [
+    fieldValue(props.quote, field) || "接口未提供",
+    quoteFieldColorHint(field),
+  ]
+    .filter(Boolean)
+    .join("；");
 }
 </script>
 <template>
@@ -187,10 +178,7 @@ function tone(field: QuoteField): string {
             :data-field="field.index"
           >
             <dt>{{ field.label }}</dt>
-            <dd
-              :class="tone(field)"
-              :title="fieldValue(quote, field) || '接口未提供'"
-            >
+            <dd :class="tone(field)" :title="fieldTitle(field)">
               {{ formatQuoteField(fieldValue(quote, field), field.unit, 2) }}
             </dd>
           </div>
@@ -231,7 +219,7 @@ function tone(field: QuoteField): string {
             :data-field="field.index"
           >
             <dt>{{ field.label }}</dt>
-            <dd :class="tone(field)">
+            <dd :class="tone(field)" :title="fieldTitle(field)">
               {{ formatQuoteField(fieldValue(quote, field), field.unit, 2) }}
             </dd>
           </div>

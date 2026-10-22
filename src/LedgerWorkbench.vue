@@ -159,25 +159,57 @@ const scopedTradeAnalysis = computed(() =>
       )
     : null,
 );
+const collapsedStageIds = ref(new Set<string>());
+const compactEntryStages = computed(() => {
+  const stages = new Map<
+    string,
+    NonNullable<typeof scopedTradeAnalysis.value>["stages"][number]
+  >();
+  for (const stage of scopedTradeAnalysis.value?.stages ?? [])
+    for (const id of stage.entryIds) stages.set(id, stage);
+  return stages;
+});
+function stageCollapsed(entryId: string) {
+  const key = compactEntryStages.value.get(entryId)?.entryIds[0];
+  return key != null && collapsedStageIds.value.has(key);
+}
+function toggleStage(entryId: string) {
+  const key = compactEntryStages.value.get(entryId)?.entryIds[0];
+  if (key == null) return;
+  if (collapsedStageIds.value.has(key)) collapsedStageIds.value.delete(key);
+  else collapsedStageIds.value.add(key);
+}
 const compactStageHeaders = computed(() => {
   const headers = new Map<
     string,
     NonNullable<typeof scopedTradeAnalysis.value>["stages"][number]
   >();
+  const visible = new Set(tradeRows.value.map((entry) => entry.id));
   for (const stage of scopedTradeAnalysis.value?.stages ?? []) {
-    const id = stage.entryIds.at(-1);
+    const id = [...stage.entryIds].reverse().find((id) => visible.has(id));
     if (id) headers.set(id, stage);
   }
   return headers;
 });
+const tradeCostHint =
+  "该笔成交后的做T摊薄每股成本（元）＝（本轮买入总支出−卖出净回款）÷剩余股数，已含手续费。持仓归零时显示—；同日买回延续本轮，日终清仓后重新建仓重算。";
 function compactTradeLabel(entry: Entry) {
-  return (
-    scopedTradeAnalysis.value?.classifications[entry.id]?.label ??
-    tradeTypeLabels.value[entry.id]
-  );
+  const classification = scopedTradeAnalysis.value?.classifications[entry.id];
+  if (entry.kind === "opening") return "期初";
+  if (classification?.trueClose) return "真清仓";
+  if (tradeTypeLabels.value[entry.id] === "清仓") return "清仓";
+  if (new Decimal(classification?.tQuantity ?? 0).gt(0)) return "做T";
+  return entry.kind === "sell" ? "部分卖出" : "买入";
 }
 function compactTradeTitle(entry: Entry) {
-  return scopedTradeAnalysis.value?.classifications[entry.id]?.detail;
+  const classification = scopedTradeAnalysis.value?.classifications[entry.id];
+  const direction =
+    entry.kind === "opening"
+      ? "期初持仓"
+      : entry.kind === "buy"
+        ? "买入"
+        : "卖出";
+  return `${direction} ${entry.quantity} 股；${classification?.label ?? tradeTypeLabels.value[entry.id]}；${classification?.detail ?? ""}`;
 }
 const tradeRows = computed(() =>
   account.value.entries
@@ -2061,20 +2093,21 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
             :class="{ 'compact-history': historyCompact }"
           >
             <colgroup v-if="historyCompact">
-              <col style="width: 85px" />
+              <col style="width: 76px" />
+              <col style="width: 62px" />
+              <col style="width: 64px" />
               <col style="width: 82px" />
-              <col style="width: 64px" />
-              <col style="width: 64px" />
-              <col style="width: 60px" />
-              <col style="width: 78px" />
+              <col style="width: 58px" />
+              <col style="width: 82px" />
               <col style="width: 92px" />
               <col />
             </colgroup>
             <colgroup v-else>
-              <col style="width: 85px" />
+              <col style="width: 76px" />
               <col v-if="!historySecurityId" style="width: 160px" />
               <col style="width: 60px" />
               <col style="width: 90px" />
+              <col style="width: 110px" />
               <col style="width: 90px" />
               <col style="width: 90px" />
               <col style="width: 120px" />
@@ -2088,12 +2121,20 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                 <th v-if="!historySecurityId">证券</th>
                 <th>类型</th>
                 <th>价格</th>
+                <th :title="tradeCostHint">持仓成本</th>
                 <th>数量</th>
-                <th>佣金</th>
-                <th>
+                <th v-if="!historyCompact">佣金</th>
+                <th
+                  :title="
+                    historyCompact
+                      ? '上行：费用合计（已包含佣金）；下行：佣金明细，不重复相加'
+                      : undefined
+                  "
+                >
                   <template v-if="historyCompact"
-                    >费用合计<small>口径</small></template
-                  ><template v-else>费用合计 / 口径</template>
+                    >费用合计<small>佣金</small></template
+                  >
+                  <template v-else>费用合计 / 口径</template>
                 </th>
                 <th>现金流</th>
                 <th>备注</th>
@@ -2107,55 +2148,77 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   class="trade-stage-row"
                 >
                   <td colspan="8">
-                    <span>
-                      第 {{ compactStageHeaders.get(e.id)!.index }} 阶段 ·
-                      {{ compactStageHeaders.get(e.id)!.start }}
-                      <template
-                        v-if="
-                          compactStageHeaders.get(e.id)!.status === 'closed'
-                        "
-                      >
-                        — {{ compactStageHeaders.get(e.id)!.end }} · 已真清仓
-                      </template>
-                      <template v-else>至今 · 持仓中</template>
-                    </span>
-                    <span>
-                      收益
-                      <b :class="tone(compactStageHeaders.get(e.id)!.profit)">{{
-                        money(compactStageHeaders.get(e.id)!.profit)
-                      }}</b>
-                      · 收益率
-                      <b
-                        :class="tone(compactStageHeaders.get(e.id)!.returnRate)"
-                        >{{
-                          percent(compactStageHeaders.get(e.id)!.returnRate)
-                        }}</b
-                      >
-                      · 做T
-                      <b
-                        :class="tone(compactStageHeaders.get(e.id)!.tProfit)"
-                        >{{ money(compactStageHeaders.get(e.id)!.tProfit) }}</b
-                      >
-                    </span>
+                    <button
+                      type="button"
+                      class="trade-stage-toggle"
+                      :aria-label="`第 ${compactStageHeaders.get(e.id)!.index} 阶段交易记录`"
+                      :aria-expanded="!stageCollapsed(e.id)"
+                      :title="
+                        stageCollapsed(e.id)
+                          ? '展开该阶段交易记录'
+                          : '收起该阶段交易记录'
+                      "
+                      @click="toggleStage(e.id)"
+                    >
+                      <span class="trade-stage-title">
+                        <span
+                          class="trade-stage-chevron"
+                          :class="{ collapsed: stageCollapsed(e.id) }"
+                          aria-hidden="true"
+                          >›</span
+                        >
+                        <span>
+                          第 {{ compactStageHeaders.get(e.id)!.index }} 阶段 ·
+                          {{ compactStageHeaders.get(e.id)!.start }}
+                          <template
+                            v-if="
+                              compactStageHeaders.get(e.id)!.status === 'closed'
+                            "
+                          >
+                            — {{ compactStageHeaders.get(e.id)!.end }} ·
+                            已真清仓
+                          </template>
+                          <template v-else>至今 · 持仓中</template>
+                        </span>
+                      </span>
+                      <span class="trade-stage-summary">
+                        收益
+                        <b
+                          :class="tone(compactStageHeaders.get(e.id)!.profit)"
+                          >{{ money(compactStageHeaders.get(e.id)!.profit) }}</b
+                        >
+                        · 收益率
+                        <b
+                          :class="
+                            tone(compactStageHeaders.get(e.id)!.returnRate)
+                          "
+                          >{{
+                            percent(compactStageHeaders.get(e.id)!.returnRate)
+                          }}</b
+                        >
+                        · 做T
+                        <b
+                          :class="tone(compactStageHeaders.get(e.id)!.tProfit)"
+                          >{{
+                            money(compactStageHeaders.get(e.id)!.tProfit)
+                          }}</b
+                        >
+                      </span>
+                    </button>
                   </td>
                 </tr>
-                <tr class="trade-record-row">
-                  <td>
-                    <template v-if="historyCompact">
-                      <span>{{ e.date }}</span>
-                      <small>{{
-                        new Date(e.time).toLocaleTimeString("zh-CN", {
-                          timeZone: "Asia/Shanghai",
-                          hour12: false,
-                        })
-                      }}</small>
-                    </template>
-                    <template v-else>{{
-                      new Date(e.time).toLocaleString("zh-CN", {
+                <tr
+                  v-if="!historyCompact || !stageCollapsed(e.id)"
+                  class="trade-record-row"
+                >
+                  <td class="trade-time">
+                    <span>{{ e.date }}</span>
+                    <small>{{
+                      new Date(e.time).toLocaleTimeString("zh-CN", {
                         timeZone: "Asia/Shanghai",
                         hour12: false,
                       })
-                    }}</template>
+                    }}</small>
                   </td>
                   <td v-if="!historySecurityId">
                     {{
@@ -2184,9 +2247,39 @@ onBeforeUnmount(() => clearTimeout(toastTimer));
                   <td>
                     {{ e.price }}
                   </td>
+                  <td
+                    class="trade-position-cost"
+                    :title="
+                      ledger.costAfterEntry[e.id] == null
+                        ? '该笔成交后持仓为0，无每股成本'
+                        : `${money(ledger.costAfterEntry[e.id], 4)} 元/股；${tradeCostHint}`
+                    "
+                  >
+                    {{ money(ledger.costAfterEntry[e.id], 4) }}
+                  </td>
                   <td>{{ e.quantity }}</td>
-                  <td>{{ money(e.fees?.commission) }}</td>
-                  <td>
+                  <td v-if="!historyCompact">
+                    {{ money(e.fees?.commission) }}
+                  </td>
+                  <td
+                    v-if="historyCompact"
+                    class="trade-fees"
+                    :title="
+                      e.fees
+                        ? (e.feeSource === 'actual'
+                            ? '交割单实录'
+                            : '费率估算') + '；费用合计已包含佣金，不重复相加'
+                        : '期初持仓，无成交费用'
+                    "
+                  >
+                    <span class="trade-total-fees">{{
+                      money(e.fees?.total)
+                    }}</span>
+                    <small class="trade-commission">{{
+                      money(e.fees?.commission)
+                    }}</small>
+                  </td>
+                  <td v-else>
                     {{ money(e.fees?.total)
                     }}<small v-if="e.fees">{{
                       e.feeSource === "actual" ? "交割单实录" : "费率估算"

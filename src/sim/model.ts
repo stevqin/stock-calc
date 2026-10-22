@@ -88,6 +88,8 @@ export interface Position {
   lots: Lot[];
 }
 export interface Ledger {
+  /** Diluted unit cost immediately after each entry; null when no shares remain. */
+  costAfterEntry: Record<string, string | null>;
   cash: string;
   capital: string;
   realized: string;

@@ -96,12 +96,12 @@ describe("交易台", () => {
     expect(
       wrapper.findAll("col").map((col) => col.attributes("style")),
     ).toEqual([
-      "width: 85px;",
+      "width: 76px;",
+      "width: 62px;",
+      "width: 64px;",
       "width: 82px;",
-      "width: 64px;",
-      "width: 64px;",
-      "width: 60px;",
-      "width: 78px;",
+      "width: 58px;",
+      "width: 82px;",
       "width: 92px;",
       undefined,
     ]);
@@ -133,10 +133,11 @@ describe("交易台", () => {
     expect(
       wrapper.findAll("col").map((col) => col.attributes("style")),
     ).toEqual([
-      "width: 85px;",
+      "width: 76px;",
       "width: 160px;",
       "width: 60px;",
       "width: 90px;",
+      "width: 110px;",
       "width: 90px;",
       "width: 90px;",
       "width: 120px;",
@@ -219,6 +220,7 @@ describe("交易台", () => {
     expect(saved.entries[0].time).toBe(a.entries[0].time);
     expect(saved.entries[0].price).toBe("9");
     expect(saved.entries[0].fees?.total).toBe("2.00");
+    expect(wrapper.get(".trade-position-cost").text()).toBe("9.0100");
     expect(wrapper.find(".modal-backdrop").exists()).toBe(false);
     expect(document.querySelector(".floating-notices")?.textContent).toContain(
       "历史记录已修改",
@@ -588,4 +590,182 @@ it("历史成交可切换为合并资金流水的对账时间线并聚焦负余�
   expect(
     wrapper.findAll(".reconcile-table .record-actions button"),
   ).toHaveLength(3);
+});
+
+it("两处历史记录显示每笔成交后的成本，日期筛选不截断成本历史，详情费用上下合列", async () => {
+  const account = manualAccount();
+  for (const [kind, price, quantity, time] of [
+    ["buy", "10", "100", "2026-08-25T01:00:00.000Z"],
+    ["sell", "12", "50", "2026-08-26T01:00:00.000Z"],
+  ] as const)
+    insertRecord(
+      account,
+      draftRecord(account, "sh510300", kind, price, quantity, time, "", {
+        commission: "1",
+        stamp: "0",
+        transfer: "0",
+      }).entry,
+    );
+  wrapper = mount(Workspace, {
+    props: {
+      embedded: true,
+      initialTab: "trades",
+      snapshot: { account, revision: 1 },
+    },
+  });
+  await flushPromises();
+  expect(wrapper.findAll(".trade-position-cost").map((c) => c.text())).toEqual([
+    "8.0400",
+    "10.0100",
+  ]);
+  await setDateTime("history-start-date", "2026-08-26");
+  expect(wrapper.findAll(".trade-position-cost").map((c) => c.text())).toEqual([
+    "8.0400",
+  ]);
+  await wrapper.setProps({
+    historySecurityId: "sh510300",
+    historyReadOnly: true,
+  });
+  const table = wrapper.get(".compact-history");
+  expect(table.findAll("th").map((th) => th.text())).toContain("持仓成本");
+  expect(table.get(".trade-fees .trade-commission").text()).toContain("1.00");
+  expect(table.get(".trade-fees .trade-total-fees").text()).toContain("1.00");
+  expect(
+    table
+      .get(".trade-fees")
+      .element.children[0].classList.contains("trade-total-fees"),
+  ).toBe(true);
+  expect(
+    table
+      .get(".trade-fees")
+      .element.children[1].classList.contains("trade-commission"),
+  ).toBe(true);
+  expect(table.findAll(".trade-record-row")[0].text()).toContain("部分卖出");
+  expect(table.findAll(".trade-position-cost")[0].text()).toBe("8.0400");
+});
+
+it("详情类型保留清仓和真清仓区别，将做T方向放到提示中", async () => {
+  const account = manualAccount();
+  const trades = [
+    ["buy", "300", "2026-08-25T01:00:00.000Z"],
+    ["sell", "100", "2026-08-26T01:00:00.000Z"],
+    ["sell", "200", "2026-08-27T01:00:00.000Z"],
+    ["buy", "200", "2026-08-27T02:00:00.000Z"],
+    ["sell", "50", "2026-08-28T01:00:00.000Z"],
+    ["buy", "50", "2026-08-28T02:00:00.000Z"],
+    ["sell", "200", "2026-08-31T01:00:00.000Z"],
+  ] as const;
+  for (const [kind, quantity, time] of trades)
+    insertRecord(
+      account,
+      draftRecord(account, "sh510300", kind, "10", quantity, time, "", {
+        commission: "0",
+        stamp: "0",
+        transfer: "0",
+      }).entry,
+    );
+  wrapper = mount(Workspace, {
+    props: {
+      embedded: true,
+      initialTab: "trades",
+      historySecurityId: "sh510300",
+      historyReadOnly: true,
+      snapshot: { account, revision: 1 },
+    },
+  });
+  await flushPromises();
+  const rows = wrapper.findAll(".trade-record-row");
+  expect(rows.map((row) => row.findAll("td")[1].text())).toEqual([
+    "真清仓",
+    "做T",
+    "做T",
+    "做T",
+    "清仓",
+    "部分卖出",
+    "买入",
+  ]);
+  expect(rows[1].findAll("td")[1].get("span").attributes("title")).toContain(
+    "买入 50 股",
+  );
+  expect(rows[2].findAll("td")[1].get("span").attributes("title")).toContain(
+    "卖出 50 股",
+  );
+  expect(rows[0].get(".trade-position-cost").text()).toBe("—");
+  expect(rows[4].get(".trade-position-cost").text()).toBe("—");
+});
+
+async function startCollapsibleStageHistory() {
+  const account = manualAccount();
+  for (const [kind, quantity, date] of [
+    ["buy", "100", "2026-08-25"],
+    ["sell", "100", "2026-08-26"],
+    ["buy", "200", "2026-08-27"],
+    ["sell", "50", "2026-08-28"],
+  ] as const)
+    insertRecord(
+      account,
+      draftRecord(
+        account,
+        "sh510300",
+        kind,
+        "10",
+        quantity,
+        `${date}T01:00:00.000Z`,
+        "",
+        { commission: "1", stamp: "0", transfer: "0" },
+      ).entry,
+    );
+  wrapper = mount(Workspace, {
+    props: {
+      embedded: true,
+      initialTab: "trades",
+      historySecurityId: "sh510300",
+      historyReadOnly: true,
+      snapshot: { account, revision: 1 },
+    },
+  });
+  await flushPromises();
+}
+it("每个持仓阶段独立折叠，保留阶段汇总并能重新展开", async () => {
+  await startCollapsibleStageHistory();
+  const stage = (n: number) =>
+    wrapper.get(`button[aria-label="第 ${n} 阶段交易记录"]`);
+  expect(wrapper.findAll(".trade-record-row")).toHaveLength(4);
+  expect(stage(2).attributes("aria-expanded")).toBe("true");
+  await stage(2).trigger("click");
+  expect(stage(2).attributes("aria-expanded")).toBe("false");
+  expect(wrapper.findAll(".trade-record-row")).toHaveLength(2);
+  expect(wrapper.findAll(".trade-stage-row")).toHaveLength(2);
+  expect(stage(2).text()).toContain("收益");
+  expect(stage(2).text()).toContain("做T");
+  await stage(1).trigger("click");
+  expect(wrapper.findAll(".trade-record-row")).toHaveLength(0);
+  expect(wrapper.text()).not.toContain("该证券暂无交易记录");
+  await stage(2).trigger("click");
+  expect(wrapper.findAll(".trade-record-row")).toHaveLength(2);
+  expect(wrapper.findAll(".trade-record-row")[0].text()).toContain(
+    "2026-08-28",
+  );
+});
+it("筛选排除阶段最后一笔后仍可折叠，清除筛选保持阶段折叠状态", async () => {
+  await startCollapsibleStageHistory();
+  await setDateTime("history-start-date", "2026-08-27");
+  await setDateTime("history-end-date", "2026-08-27");
+  expect(wrapper.findAll(".trade-stage-row")).toHaveLength(1);
+  const stage = () => wrapper.get('button[aria-label="第 2 阶段交易记录"]');
+  await stage().trigger("click");
+  expect(wrapper.findAll(".trade-record-row")).toHaveLength(0);
+  await wrapper.get(".history-filter-result button").trigger("click");
+  expect(stage().attributes("aria-expanded")).toBe("false");
+  expect(wrapper.findAll(".trade-record-row")).toHaveLength(2);
+  await stage().trigger("click");
+  const cell = wrapper.findAll(".trade-record-row")[0].get(".trade-time");
+  expect(cell.get("span").text()).toBe("2026-08-28");
+  expect(cell.get("small").text()).toBe("09:00:00");
+  await wrapper.setProps({
+    historySecurityId: undefined,
+    historyReadOnly: false,
+  });
+  expect(wrapper.get(".trade-time span").text()).toBe("2026-08-28");
+  expect(wrapper.get(".trade-time small").text()).toBe("09:00:00");
 });

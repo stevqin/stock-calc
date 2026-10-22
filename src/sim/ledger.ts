@@ -265,6 +265,7 @@ export function replay(account: Account, today = shanghaiDate()): Ledger {
     }
   };
   const positions: Record<string, Position> = {};
+  const costAfterEntry: Ledger["costAfterEntry"] = {};
   const securities = new Map(
     account.securities.map((s) => {
       validateSecurity(s);
@@ -355,6 +356,9 @@ export function replay(account: Account, today = shanghaiDate()): Ledger {
     lastDates[s.id] = e.date;
     if (cash.lt(0)) cashWarnings++;
     p.quantity = p.lots.reduce((n, l) => n.plus(l.quantity), D(0)).toString();
+    costAfterEntry[e.id] = D(p.quantity).gt(0)
+      ? D(p.netInvestment).div(p.quantity).toFixed(4)
+      : null;
   }
   applyCash("9999");
   for (const p of Object.values(positions)) {
@@ -378,6 +382,7 @@ export function replay(account: Account, today = shanghaiDate()): Ledger {
       Object.values(positions).reduce((v, p) => v.plus(p.realized), D(0)),
     ),
     positions,
+    costAfterEntry,
     deposits: cents(deposits),
     withdrawals: cents(withdrawals),
     income: cents(income),
